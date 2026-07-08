@@ -1,0 +1,413 @@
+'use client'
+
+import { useState, useEffect, useMemo } from 'react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
+
+export default function POSPage() {
+  const [products, setProducts] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [cart, setCart] = useState<any[]>([])
+  
+  const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash')
+  const [cashReceived, setCashReceived] = useState<number | string>('')
+  const [isFreeBill, setIsFreeBill] = useState(false)
+  const [cashierName, setCashierName] = useState('พนักงาน')
+  
+  const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
+  const [printReceipt, setPrintReceipt] = useState<any>(null)
+
+  const [isClosingShift, setIsClosingShift] = useState(false)
+  const [posCashToday, setPosCashToday] = useState(0)
+  const [posTransferToday, setPosTransferToday] = useState(0)
+  const [actualPosCash, setActualPosCash] = useState<number | string>('')
+  const [closeShiftSlip, setCloseShiftSlip] = useState<any>(null)
+
+  // 🌟 State สำหรับระบบ PIN เปิดลิ้นชักด้วยมือ
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false)
+  const [pinInput, setPinInput] = useState('')
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false)
+
+  const pathname = usePathname()
+
+  useEffect(() => {
+    // 🌟 ดึงชื่อพนักงานที่ล็อกอินมาใช้งาน
+    const session = localStorage.getItem('kingsawang_session')
+    if (session) {
+      setCashierName(JSON.parse(session).name)
+    }
+    
+    fetchActiveProducts()
+    if (window.innerWidth > 1024) setPrintFormat('A4')
+  }, [])
+
+  const fetchActiveProducts = async () => {
+    setIsLoading(true)
+    const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
+    if (data) setProducts(data.filter((p: any) => p.isActive === true || p.isActive === 'true'))
+    setIsLoading(false)
+  }
+
+  const mainProducts = products.filter(p => p.category === 'main')
+  const retailProducts = products.filter(p => p.category === 'retail')
+
+  const subTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.qty), 0), [cart])
+  const totalAmount = isFreeBill ? 0 : subTotal 
+  const change = useMemo(() => { const r = Number(cashReceived); return r > totalAmount ? r - totalAmount : 0 }, [cashReceived, totalAmount])
+
+  const addToCart = (product: any) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
+  const updateQty = (id: string, delta: number) => { setCart(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)) }
+  const editPrice = (id: string, currentPrice: number) => { const n = window.prompt('ราคาใหม่:', currentPrice.toString()); if(n) setCart(prev => prev.map(i => i.id === id ? { ...i, price: Number(n) } : i)) }
+  const addCustomRetailItem = () => { const p = window.prompt('ลูกค้าระบุซื้อกี่บาท?'); if(p) addToCart({ id: `CUSTOM-${Date.now()}`, name: `น้ำแข็งแบ่งขาย/ตัก (${p}บ.)`, category: 'retail', price: Number(p), unit: 'ถุง', icon: '🛍️', image: '', isActive: true, color: 'bg-orange-50' }) }
+  const removeFromCart = (id: string) => setCart(prev => prev.filter(i => i.id !== id))
+  const clearCart = () => { setCart([]); setCashReceived(''); setPaymentMethod('cash'); setIsFreeBill(false); }
+  const addQuickCash = (amount: number) => setCashReceived(prev => Number(prev || 0) + amount)
+  const exactCash = () => setCashReceived(totalAmount)
+
+  // 🚀 อัปเกรด: ตัดสต๊อกอัตโนมัติเมื่อกดชำระเงิน
+  const handleCheckout = async () => {
+    if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
+    let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
+    if (paymentMethod === 'cash' && !isFreeBill && finalReceived < totalAmount) return alert('รับเงินมาไม่ครบ!')
+
+    const billNo = `POS-${Date.now().toString().slice(-4)}`
+    const finalChange = isFreeBill ? 0 : (paymentMethod === 'transfer' ? 0 : finalReceived - totalAmount)
+    const actualReceive = isFreeBill ? 0 : (paymentMethod === 'transfer' ? totalAmount : finalReceived)
+    const currentDate = new Date().toISOString()
+
+    // 1. บันทึกยอดขาย
+    const newSale = { id: billNo, totalAmount, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
+    await supabase.from('sales').insert([newSale])
+
+    // 🌟 2. วิ่งไปตัดสต๊อกในฐานข้อมูล 🌟
+    const stockUpdatePromises = cart
+      .filter(item => !String(item.id).startsWith('CUSTOM-')) // ข้ามรายการน้ำแข็งตักขายที่ไม่มีรหัสสินค้าจริง
+      .map(item => {
+        const currentProduct = products.find(p => p.id === item.id)
+        const currentStock = Number(currentProduct?.stock || 0)
+        const newStock = currentStock - item.qty // หักลบจำนวนที่ขายออก
+        return supabase.from('products').update({ stock: newStock }).eq('id', item.id)
+      })
+    
+    await Promise.all(stockUpdatePromises) // รอให้ตัดสต๊อกเสร็จทุกรายการ
+
+    // 3. จัดการเรื่องพิมพ์บิลและลิ้นชัก
+    const receiptData = { receiptNo: billNo, date: new Date().toLocaleString('th-TH'), items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: isFreeBill ? 'ให้ฟรี (ของแถม)' : (paymentMethod === 'cash' ? 'เงินสด' : 'โอนเงิน'), cashier: cashierName }
+    const logId = `LOG-${Date.now()}`
+    
+    if (isFreeBill || paymentMethod === 'transfer') {
+      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `ขายบิล #${billNo} (${isFreeBill ? 'ให้ฟรี' : 'โอนเงิน'})`, print_status: 'ไม่พิมพ์บิล' }])
+      alert('✅ บันทึกรายการและตัดสต๊อกสำเร็จ (ไม่ได้สั่งพิมพ์บิล)')
+      clearCart(); setIsCheckoutModalOpen(false)
+      fetchActiveProducts() // 🔄 รีเฟรชยอดคลังบนหน้าจอ
+    } else {
+      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
+      setPrintReceipt(receiptData); setIsCheckoutModalOpen(false)
+      setTimeout(() => { 
+        window.print(); 
+        setTimeout(() => { 
+          setPrintReceipt(null); 
+          clearCart(); 
+          fetchActiveProducts() // 🔄 รีเฟรชยอดคลังบนหน้าจอ
+        }, 500) 
+      }, 300)
+    }
+  }
+
+  // 🌟 ฟังก์ชันตรวจสอบรหัส PIN ก่อนเตะลิ้นชัก
+  const submitManualOpenWithPin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!pinInput) return
+    setIsVerifyingPin(true)
+
+    // ค้นหาพนักงานที่มี PIN นี้
+    const { data: employeeData, error } = await supabase
+      .from('employees')
+      .select('name, role')
+      .eq('pin', pinInput)
+      .eq('isActive', true)
+      .single()
+
+    if (error || !employeeData) {
+      alert('❌ รหัสพนักงานไม่ถูกต้อง หรือพนักงานไม่มีสิทธิ์ใช้งาน')
+      setIsVerifyingPin(false)
+      setPinInput('')
+      return
+    }
+
+    // ถ้ารหัสถูก ให้บันทึกประวัติด้วย "ชื่อเจ้าของรหัส"
+    await supabase.from('drawer_logs').insert([{ 
+      id: `LOG-${Date.now()}`, 
+      employee_name: employeeData.name, 
+      role: employeeData.role, 
+      reason: 'เปิดด้วยมือ (ใส่รหัสผ่านกดหน้า POS)', 
+      print_status: 'ผู้ดูแลระบบ' 
+    }])
+
+    setIsVerifyingPin(false)
+    setIsPinModalOpen(false)
+    setPinInput('')
+
+    // สั่งพิมพ์หน้าเปล่าเพื่อเตะลิ้นชัก
+    setPrintReceipt({ isManualKick: true })
+    setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
+  }
+
+  const handleOpenCloseShift = async () => {
+    setIsClosingShift(true)
+    const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0]
+    const { data } = await supabase.from('sales').select('totalAmount, payMethod').gte('createdAt', `${todayStr}T00:00:00+07:00`).lte('createdAt', `${todayStr}T23:59:59+07:00`)
+    let cCash = 0, cTransfer = 0
+    if (data) { data.forEach(sale => { if (sale.payMethod === 'cash') cCash += Number(sale.totalAmount); if (sale.payMethod === 'transfer') cTransfer += Number(sale.totalAmount); }) }
+    setPosCashToday(cCash); setPosTransferToday(cTransfer)
+  }
+
+  const submitCloseShift = async () => {
+    if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้')
+    const diff = Number(actualPosCash) - posCashToday
+    if (diff !== 0 && !confirm(`เงินสดในเก๊ะ ${diff > 0 ? 'เกิน' : 'ขาด'} ${Math.abs(diff)} บาท ยืนยันการปิดกะหรือไม่?`)) return
+    
+    // บันทึก Log
+    await supabase.from('drawer_logs').insert([{ 
+      id: `LOG-${Date.now()}`, 
+      employee_name: cashierName, 
+      role: 'แคชเชียร์', 
+      reason: 'เปิดอัตโนมัติ (พิมพ์สลิปส่งยอดปิดกะ)', 
+      print_status: 'พิมพ์บิล' 
+    }])
+    
+    setCloseShiftSlip({ 
+      id: `CLS-POS-${Date.now().toString().slice(-6)}`, 
+      date: new Date().toLocaleString('th-TH'), 
+      cashAmount: posCashToday, 
+      transferAmount: posTransferToday, 
+      actualCash: Number(actualPosCash), 
+      diff, 
+      by: cashierName 
+    })
+    setIsClosingShift(false)
+    
+    // 🖨️ สั่งพิมพ์และ Logout อัตโนมัติ
+    setTimeout(() => { 
+      window.print() 
+      // 🌟 เพิ่มระบบ Logout ตรงนี้หลังพิมพ์เสร็จ
+      setTimeout(() => { 
+        setCloseShiftSlip(null)
+        alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
+        localStorage.removeItem('kingsawang_session')
+        window.location.href = '/login'
+      }, 500) 
+    }, 300)
+  }
+
+  const TabletNav = () => (
+    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+      <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
+      <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
+        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
+        <Link href="/inventory" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
+        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
+      </div>
+      <div className="bg-white px-4 py-3 md:py-3.5 rounded-2xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs md:text-sm shrink-0 flex items-center gap-2">
+        <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-lg">👤</span>
+        <span className="hidden md:inline">พนักงาน:</span> {cashierName}
+      </div>
+    </div>
+  )
+
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{__html: `@media print { @page { size: ${closeShiftSlip || printFormat === '58mm' ? '58mm auto' : 'A4 portrait'}; margin: ${closeShiftSlip || printFormat === '58mm' ? '0' : '15mm'}; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; margin: 0; padding: 0;} }`}} />
+
+      <div className={`fixed inset-0 z-[99] flex flex-col md:flex-row bg-slate-100 overflow-hidden text-xs print:hidden ${(printReceipt || closeShiftSlip) ? 'hidden' : 'flex'}`}>
+        
+        {/* === ด้านซ้าย === */}
+        <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden relative">
+          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 shrink-0 gap-4">
+            <TabletNav />
+            <div className="flex items-center gap-2 shrink-0">
+              {/* 🌟 เปลี่ยนปุ่มให้คลิกแล้วเปิด Modal กรอก PIN */}
+              <button onClick={() => { setPinInput(''); setIsPinModalOpen(true); }} className="bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-3 rounded-2xl font-bold border border-amber-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
+                🔓 <span className="hidden xl:inline">เปิดลิ้นชัก (Manual)</span>
+              </button>
+              <div className="bg-white rounded-2xl flex p-1.5 border border-slate-200 shadow-sm">
+                <button onClick={() => setPrintFormat('58mm')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${printFormat === '58mm' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>58mm</button>
+                <button onClick={() => setPrintFormat('A4')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${printFormat === 'A4' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>A4</button>
+              </div>
+              <button onClick={handleOpenCloseShift} className="bg-rose-50 hover:bg-rose-100 text-rose-700 px-4 py-3 rounded-2xl font-bold border border-rose-200 transition-all flex items-center gap-2 shadow-sm active:scale-95 text-xs">
+                🔐 ปิดกะส่งยอด
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto pr-2 pb-24 md:pb-0 space-y-6">
+             {isLoading ? (<div className="text-center py-20 font-bold text-lg text-slate-400">⏳ กำลังโหลดสินค้า...</div>) : (
+               <>
+                 {mainProducts.length > 0 && (<div><h2 className="font-black text-slate-700 text-sm md:text-base mb-3">🧊 สินค้ากระสอบ และ แพ็ค</h2><div className="grid grid-cols-3 xl:grid-cols-4 gap-4">{mainProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="w-14 h-14 md:w-20 md:h-20 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><img src={product.image} className="w-full h-full object-cover" /></div>) : (<span className="text-4xl md:text-5xl mb-2 group-hover:scale-110 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center leading-tight mb-1">{product.name}</span><span className="font-black text-blue-600 text-lg">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>)}
+                 <div><h2 className="font-black text-orange-700 text-sm md:text-base mb-3 border-t border-slate-200 pt-5">🛍️ สินค้าแบ่งขายปลีก (ย่อย)</h2><div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"><button onClick={addCustomRetailItem} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-orange-50 border-orange-300 text-orange-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">⚖️</span><span className="font-bold text-sm text-center mb-1">น้ำแข็งตักขาย</span><span className="font-black text-orange-600 text-xs bg-orange-100 px-2 py-1 rounded">ระบุราคา ✏️</span></button>{retailProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="w-12 h-12 md:w-16 md:h-16 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><img src={product.image} className="w-full h-full object-cover" /></div>) : (<span className="text-4xl mb-2 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center mb-1">{product.name}</span><span className="font-black text-orange-600 text-base">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>
+               </>
+             )}
+          </div>
+        </div>
+
+        {/* === ด้านขวา (ตะกร้า) === */}
+        <div className="w-full md:w-[350px] lg:w-[400px] xl:w-[450px] bg-white border-l border-slate-200 shadow-2xl flex flex-col h-[75vh] md:h-full fixed md:relative bottom-0 z-20 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300">
+           <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/80"><h2 className="font-black text-slate-900 text-lg flex items-center gap-2">🧾 รายการขาย</h2>{cart.length > 0 && (<button onClick={clearCart} className="text-rose-500 font-bold text-sm bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-colors">ล้างรายการ</button>)}</div>
+           <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-slate-50/50">
+             {cart.length === 0 ? (
+               <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-5xl">🛒</span><p className="font-bold text-sm">แตะสินค้าด้านซ้ายเพื่อเพิ่มรายการ</p></div>
+             ) : (
+               cart.map(item => (<div key={item.id} className="flex justify-between items-center border border-slate-200 p-3 rounded-2xl bg-white shadow-sm"><div className="flex-1 min-w-[80px]"><h3 className="font-bold text-slate-800 text-sm truncate">{item.name}</h3><button onClick={() => editPrice(item.id, item.price)} className="text-xs text-slate-500 font-bold mt-1 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded transition-colors">✏️ {item.price} บ.</button></div><div className="flex items-center gap-3"><div className="flex items-center bg-slate-100 rounded-xl p-1 border border-slate-200"><button onClick={() => updateQty(item.id, -1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">-</button><span className="w-8 text-center font-black text-sm">{item.qty}</span><button onClick={() => updateQty(item.id, 1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">+</button></div><div className="w-14 text-right"><span className="font-black text-blue-600 text-base">{(item.price * item.qty).toLocaleString()}</span></div><button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-rose-500 font-black text-lg px-2">✕</button></div></div>))
+             )}
+           </div>
+           
+           <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+             <div className="flex justify-between items-end mb-5"><span className="font-bold text-slate-500 text-base">ยอดรวมทั้งสิ้น</span><span className="font-black text-5xl text-slate-900 tracking-tight">{cart.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}<span className="text-base text-slate-500 ml-1 font-bold">บ.</span></span></div>
+             <button onClick={() => setIsCheckoutModalOpen(true)} disabled={cart.length === 0} className="w-full font-black text-xl py-6 rounded-[1.25rem] bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">💳 รับชำระเงิน (Pay)</button>
+           </div>
+        </div>
+      </div>
+
+      {/* 🚀 Modal: กรอกรหัส PIN ก่อนเตะลิ้นชัก */}
+      {isPinModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-xs overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-amber-50">
+              <h3 className="font-black text-lg text-amber-700 flex items-center gap-2">🔓 ใส่รหัสเพื่อเปิดลิ้นชัก</h3>
+              <button onClick={() => setIsPinModalOpen(false)} className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 font-bold transition-colors">✕</button>
+            </div>
+            <form onSubmit={submitManualOpenWithPin} className="p-6 space-y-5 text-center">
+              <p className="text-xs font-bold text-slate-500">กรุณากรอกรหัสประจำตัวพนักงาน<br/>เพื่อบันทึกประวัติการเปิดลิ้นชัก</p>
+              
+              <input 
+                type="password" 
+                maxLength={6} 
+                required
+                autoFocus
+                value={pinInput} 
+                onChange={(e) => setPinInput(e.target.value)} 
+                className="w-full bg-slate-50 border-2 border-amber-200 px-4 py-4 rounded-xl focus:outline-none focus:border-amber-500 font-black text-3xl text-center text-amber-800 tracking-widest shadow-inner" 
+                placeholder="****" 
+              />
+              
+              <button 
+                type="submit" 
+                disabled={isVerifyingPin || !pinInput}
+                className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-amber-500 hover:bg-amber-600 shadow-amber-500/30 disabled:bg-slate-300"
+              >
+                {isVerifyingPin ? '⏳ กำลังตรวจสอบ...' : 'ยืนยันรหัส & เปิดลิ้นชัก'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Modal: หน้าต่างรับชำระเงิน (Checkout) */}
+      {isCheckoutModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-black text-lg text-slate-900">💵 รับชำระเงิน</h3>
+              <button onClick={() => {setIsCheckoutModalOpen(false); setIsFreeBill(false); setCashReceived('')}} className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-rose-50 hover:text-rose-500 font-bold transition-colors">✕</button>
+            </div>
+            
+            <div className="p-6 space-y-5">
+              <label className={`flex items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer ${isFreeBill ? 'bg-orange-50 border-orange-400 text-orange-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                <input type="checkbox" checked={isFreeBill} onChange={(e) => {setIsFreeBill(e.target.checked); setPaymentMethod('cash'); setCashReceived('');}} className="w-5 h-5 accent-orange-500 rounded" />
+                <span className="font-bold text-sm">🎁 ให้ฟรี / เป็นของแถม (ไม่เตะลิ้นชัก)</span>
+              </label>
+
+              <div className="flex justify-between items-end border-b-2 border-slate-100 pb-4">
+                <span className="font-bold text-slate-500 text-sm mb-1">ยอดที่ต้องชำระ:</span>
+                <span className={`text-5xl font-black tracking-tight ${isFreeBill ? 'text-orange-500 line-through decoration-rose-500 decoration-4' : 'text-slate-900'}`}>{subTotal.toLocaleString()}<span className="text-xl font-bold ml-1">บ.</span></span>
+              </div>
+
+              {!isFreeBill && (
+                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-xl">
+                    <button onClick={() => setPaymentMethod('cash')} className={`py-3 rounded-lg font-bold text-sm transition-all shadow-sm ${paymentMethod === 'cash' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>💵 เงินสด</button>
+                    <button onClick={() => {setPaymentMethod('transfer'); setCashReceived('');}} className={`py-3 rounded-lg font-bold text-sm transition-all shadow-sm ${paymentMethod === 'transfer' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📱 โอนเงิน (QR)</button>
+                  </div>
+
+                  {paymentMethod === 'cash' && (
+                    <div className="space-y-3">
+                      <input type="number" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="รับเงินมา..." className="w-full bg-slate-50 border-2 border-slate-200 px-4 py-4 rounded-xl focus:outline-none focus:border-blue-500 font-black text-3xl text-center text-slate-800 shadow-inner" autoFocus />
+                      
+                      <div className="grid grid-cols-4 gap-2">
+                        <button onClick={exactCash} className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 py-3 rounded-lg font-black border border-emerald-200 text-sm transition-colors">พอดี</button>
+                        {[100, 500, 1000].map(amt => (
+                          <button key={amt} onClick={() => addQuickCash(amt)} className="bg-white border border-slate-200 hover:bg-slate-50 py-3 rounded-lg font-black text-slate-700 text-sm transition-colors">+{amt}</button>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between items-center bg-rose-50 p-5 rounded-xl border border-rose-100">
+                        <span className="font-bold text-rose-600 text-sm">เงินทอน:</span>
+                        <span className="font-black text-4xl text-rose-600 tracking-tight">{change > 0 ? change.toLocaleString() : '0'}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <button onClick={handleCheckout} className={`w-full text-white font-black py-4 rounded-xl shadow-lg text-lg transition-transform active:scale-95 flex items-center justify-center gap-2 ${isFreeBill || paymentMethod === 'transfer' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'}`}>
+                {isFreeBill || paymentMethod === 'transfer' ? '💾 บันทึกยอด (ไม่เตะลิ้นชัก)' : '🖨️ พิมพ์ใบเสร็จ & เปิดลิ้นชัก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Modal: ปิดกะ POS */}
+      {isClosingShift && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-rose-100 bg-rose-50 flex justify-between items-center">
+              <h3 className="font-black text-xl text-rose-700 flex items-center gap-2">🔐 ปิดกะส่งยอด (เฉพาะหน้าร้าน)</h3>
+              <button onClick={() => setIsClosingShift(false)} className="w-8 h-8 rounded-full bg-white text-slate-400 font-bold hover:text-rose-500 hover:bg-rose-100 transition-colors">✕</button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
+                  <p className="text-xs font-bold text-slate-500 mb-1">ยอดโอน (ไม่นับเข้าเก๊ะ)</p>
+                  <p className="font-black text-xl text-blue-600">{posTransferToday.toLocaleString()} บ.</p>
+                </div>
+                <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-200 text-center">
+                  <p className="text-xs font-bold text-emerald-600 mb-1">ยอดเงินสดที่ต้องมี</p>
+                  <p className="font-black text-2xl text-emerald-700">{posCashToday.toLocaleString()} บ.</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">ระบุเงินสดในลิ้นชักที่นับได้จริง 💵</label>
+                <div className="relative">
+                  <input type="number" min="0" value={actualPosCash} onChange={e => setActualPosCash(e.target.value)} className="w-full bg-white border-2 border-slate-300 px-4 py-4 rounded-2xl focus:outline-none focus:border-rose-500 font-black text-4xl text-center shadow-inner" placeholder="0"/>
+                  <button onClick={() => setActualPosCash(posCashToday)} className="absolute right-3 top-1/2 -translate-y-1/2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold px-3 py-2 rounded-xl transition-colors">พอดีเป๊ะ</button>
+                </div>
+              </div>
+
+              <button onClick={submitCloseShift} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black py-4 rounded-xl shadow-lg shadow-rose-500/30 transition-all text-lg active:scale-95">
+                🖨️ ยืนยันปิดกะ & พิมพ์สลิป (เตะลิ้นชัก)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🖨️ โซนแสดงผลการพิมพ์ (เหมือนเดิม) */}
+      {closeShiftSlip ? (
+         <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
+      ) : printReceipt && !printReceipt.isManualKick && (
+        <div className="hidden print:block text-black font-sans bg-white mx-auto" style={printFormat === '58mm' ? { width: '50mm', padding: '0 2mm', fontSize: '11px' } : { width: '100%', maxWidth: '800px', padding: '40px', fontSize: '14px' }}>
+          {printFormat === '58mm' && (<><div className="text-center mb-2 mt-2"><h2 className="font-black text-[16px]">คิงส์สว่าง</h2><p className="text-[10px] mt-0.5">ใบเสร็จรับเงินอย่างย่อ</p></div><div className="text-[9px] mb-2 border-b border-black border-dashed pb-2"><p>เลขที่: {printReceipt.receiptNo}</p><p>วันที่: {printReceipt.date}</p><p>แคชเชียร์: {printReceipt.cashier}</p></div><table className="w-full text-[10px] mb-2"><tbody>{printReceipt.items.map((item: any, i: number) => (<tr key={i}><td className="py-0.5 pr-2 w-3/5 break-words">{item.name}</td><td className="text-center w-1/5">x{item.qty}</td><td className="text-right font-bold w-1/5">{(item.qty * item.price).toLocaleString()}</td></tr>))}</tbody></table><div className="border-t border-black border-dashed pt-2 space-y-1 text-[10px]"><div className="flex justify-between font-black text-[12px]"><p>ยอดสุทธิ</p><p>{printReceipt.total.toLocaleString()}</p></div><div className="flex justify-between"><p>รับเงิน ({printReceipt.method})</p><p>{printReceipt.received.toLocaleString()}</p></div><div className="flex justify-between"><p>เงินทอน</p><p>{printReceipt.change.toLocaleString()}</p></div></div><div className="text-center text-[9px] mt-4 pt-2 border-t border-black border-dashed"><p>ขอบคุณที่ใช้บริการครับ 🙏</p><p>---</p></div></>)}
+          {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: any, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
+        </div>
+      )}
+
+      {/* 🖨️ หน้าว่าง สำหรับเตะลิ้นชักแบบ Manual */}
+      {printReceipt && printReceipt.isManualKick && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
+    </>
+  )
+}
