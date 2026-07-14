@@ -33,7 +33,6 @@ export default function POSPage() {
   const pathname = usePathname()
 
   useEffect(() => {
-    // 🌟 ดึงชื่อพนักงานที่ล็อกอินมาใช้งาน
     const session = localStorage.getItem('kingsawang_session')
     if (session) {
       setCashierName(JSON.parse(session).name)
@@ -66,7 +65,10 @@ export default function POSPage() {
   const addQuickCash = (amount: number) => setCashReceived(prev => Number(prev || 0) + amount)
   const exactCash = () => setCashReceived(totalAmount)
 
-  // 🚀 อัปเกรด: ตัดสต๊อกอัตโนมัติเมื่อกดชำระเงิน
+  // 🚀 ฟังก์ชันเช็คอุปกรณ์ว่าเป็น Mobile/Tablet หรือไม่
+  const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
+
+  // 🚀 อัปเกรด: ตัดสต๊อกอัตโนมัติเมื่อกดชำระเงิน + สั่งพิมพ์
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -76,53 +78,81 @@ export default function POSPage() {
     const finalChange = isFreeBill ? 0 : (paymentMethod === 'transfer' ? 0 : finalReceived - totalAmount)
     const actualReceive = isFreeBill ? 0 : (paymentMethod === 'transfer' ? totalAmount : finalReceived)
     const currentDate = new Date().toISOString()
+    const printDateStr = new Date().toLocaleString('th-TH')
 
     // 1. บันทึกยอดขาย
     const newSale = { id: billNo, totalAmount, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
     await supabase.from('sales').insert([newSale])
 
-    // 🌟 2. วิ่งไปตัดสต๊อกในฐานข้อมูล 🌟
+    // 2. วิ่งไปตัดสต๊อกในฐานข้อมูล
     const stockUpdatePromises = cart
-      .filter(item => !String(item.id).startsWith('CUSTOM-')) // ข้ามรายการน้ำแข็งตักขายที่ไม่มีรหัสสินค้าจริง
+      .filter(item => !String(item.id).startsWith('CUSTOM-'))
       .map(item => {
         const currentProduct = products.find(p => p.id === item.id)
         const currentStock = Number(currentProduct?.stock || 0)
-        const newStock = currentStock - item.qty // หักลบจำนวนที่ขายออก
+        const newStock = currentStock - item.qty
         return supabase.from('products').update({ stock: newStock }).eq('id', item.id)
       })
     
-    await Promise.all(stockUpdatePromises) // รอให้ตัดสต๊อกเสร็จทุกรายการ
+    await Promise.all(stockUpdatePromises)
 
     // 3. จัดการเรื่องพิมพ์บิลและลิ้นชัก
-    const receiptData = { receiptNo: billNo, date: new Date().toLocaleString('th-TH'), items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: isFreeBill ? 'ให้ฟรี (ของแถม)' : (paymentMethod === 'cash' ? 'เงินสด' : 'โอนเงิน'), cashier: cashierName }
     const logId = `LOG-${Date.now()}`
     
     if (isFreeBill || paymentMethod === 'transfer') {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `ขายบิล #${billNo} (${isFreeBill ? 'ให้ฟรี' : 'โอนเงิน'})`, print_status: 'ไม่พิมพ์บิล' }])
       alert('✅ บันทึกรายการและตัดสต๊อกสำเร็จ (ไม่ได้สั่งพิมพ์บิล)')
       clearCart(); setIsCheckoutModalOpen(false)
-      fetchActiveProducts() // 🔄 รีเฟรชยอดคลังบนหน้าจอ
+      fetchActiveProducts()
     } else {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
-      setPrintReceipt(receiptData); setIsCheckoutModalOpen(false)
-      setTimeout(() => { 
-        window.print(); 
+      setIsCheckoutModalOpen(false)
+
+      if (isMobileDevice() && navigator.share && printFormat === '58mm') {
+        // 🌟 ยิงข้อความดิบเข้าแอป RawBT สำหรับ Tablet Android
+        const textToPrint = `
+คิงส์สว่าง
+ใบเสร็จรับเงินอย่างย่อ
+--------------------------------
+เลขที่: ${billNo}
+วันที่: ${printDateStr}
+แคชเชียร์: ${cashierName}
+--------------------------------
+${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price * item.qty).toLocaleString()} บ.`).join('\n')}
+--------------------------------
+ยอดสุทธิ:     ${totalAmount.toLocaleString()} บ.
+รับเงิน:      ${actualReceive.toLocaleString()} บ.
+เงินทอน:      ${finalChange.toLocaleString()} บ.
+--------------------------------
+ขอบคุณที่ใช้บริการครับ
+`;
+        navigator.share({ text: textToPrint }).then(() => {
+          clearCart(); fetchActiveProducts()
+        }).catch(() => {
+          clearCart(); fetchActiveProducts()
+        })
+      } else {
+        // 🌟 พิมพ์ผ่านเบราว์เซอร์ปกติสำหรับ PC
+        const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
+        setPrintReceipt(receiptData)
         setTimeout(() => { 
-          setPrintReceipt(null); 
-          clearCart(); 
-          fetchActiveProducts() // 🔄 รีเฟรชยอดคลังบนหน้าจอ
-        }, 1000) 
-      }, 1000)
+          window.print(); 
+          setTimeout(() => { 
+            setPrintReceipt(null); 
+            clearCart(); 
+            fetchActiveProducts()
+          }, 1000) 
+        }, 1000)
+      }
     }
   }
 
-  // 🌟 ฟังก์ชันตรวจสอบรหัส PIN ก่อนเตะลิ้นชัก
+  // 🌟 ฟังก์ชันตรวจสอบรหัส PIN ก่อนเตะลิ้นชักด้วยมือ
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
     setIsVerifyingPin(true)
 
-    // ค้นหาพนักงานที่มี PIN นี้
     const { data: employeeData, error } = await supabase
       .from('employees')
       .select('name, role')
@@ -137,7 +167,6 @@ export default function POSPage() {
       return
     }
 
-    // ถ้ารหัสถูก ให้บันทึกประวัติด้วย "ชื่อเจ้าของรหัส"
     await supabase.from('drawer_logs').insert([{ 
       id: `LOG-${Date.now()}`, 
       employee_name: employeeData.name, 
@@ -150,9 +179,13 @@ export default function POSPage() {
     setIsPinModalOpen(false)
     setPinInput('')
 
-    // สั่งพิมพ์หน้าเปล่าเพื่อเตะลิ้นชัก
-    setPrintReceipt({ isManualKick: true })
-    setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
+    if (isMobileDevice() && navigator.share) {
+      // เตะลิ้นชักแอป RawBT ด้วยการส่งจุดไข่ปลา
+      navigator.share({ text: "." }).catch(()=>console.log('Cancelled'))
+    } else {
+      setPrintReceipt({ isManualKick: true })
+      setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
+    }
   }
 
   const handleOpenCloseShift = async () => {
@@ -169,7 +202,6 @@ export default function POSPage() {
     const diff = Number(actualPosCash) - posCashToday
     if (diff !== 0 && !confirm(`เงินสดในเก๊ะ ${diff > 0 ? 'เกิน' : 'ขาด'} ${Math.abs(diff)} บาท ยืนยันการปิดกะหรือไม่?`)) return
     
-    // บันทึก Log
     await supabase.from('drawer_logs').insert([{ 
       id: `LOG-${Date.now()}`, 
       employee_name: cashierName, 
@@ -178,28 +210,55 @@ export default function POSPage() {
       print_status: 'พิมพ์บิล' 
     }])
     
-    setCloseShiftSlip({ 
-      id: `CLS-POS-${Date.now().toString().slice(-6)}`, 
-      date: new Date().toLocaleString('th-TH'), 
-      cashAmount: posCashToday, 
-      transferAmount: posTransferToday, 
-      actualCash: Number(actualPosCash), 
-      diff, 
-      by: cashierName 
-    })
+    const slipId = `CLS-POS-${Date.now().toString().slice(-6)}`
+    const printDateStr = new Date().toLocaleString('th-TH')
     setIsClosingShift(false)
-    
-    // 🖨️ สั่งพิมพ์และ Logout อัตโนมัติ
-    setTimeout(() => { 
-      window.print() 
-      // 🌟 เพิ่มระบบ Logout ตรงนี้หลังพิมพ์เสร็จ
-      setTimeout(() => { 
-        setCloseShiftSlip(null)
+
+    if (isMobileDevice() && navigator.share && printFormat === '58mm') {
+      const textToPrint = `
+ใบนับเงินปิดกะ
+คิงส์สว่าง (หน้าร้าน POS)
+--------------------------------
+พิมพ์: ${printDateStr}
+ผู้ปิดกะ: ${cashierName}
+เลขที่: ${slipId}
+--------------------------------
+ยอดสแกนโอน:    ${posTransferToday.toLocaleString()}
+ยอดเงินสดในระบบ: ${posCashToday.toLocaleString()}
+--------------------------------
+เงินสดที่นับได้:   ${Number(actualPosCash).toLocaleString()}
+ส่วนต่าง:       ${diff === 0 ? 'พอดี' : diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
+--------------------------------
+ลงชื่อแคชเชียร์ ......................
+`;
+      navigator.share({ text: textToPrint }).then(() => {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
         localStorage.removeItem('kingsawang_session')
         window.location.href = '/login'
-      }, 1000) 
-    }, 1000)
+      }).catch(() => {
+        localStorage.removeItem('kingsawang_session')
+        window.location.href = '/login'
+      })
+    } else {
+      setCloseShiftSlip({ 
+        id: slipId, 
+        date: printDateStr, 
+        cashAmount: posCashToday, 
+        transferAmount: posTransferToday, 
+        actualCash: Number(actualPosCash), 
+        diff, 
+        by: cashierName 
+      })
+      setTimeout(() => { 
+        window.print() 
+        setTimeout(() => { 
+          setCloseShiftSlip(null)
+          alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
+          localStorage.removeItem('kingsawang_session')
+          window.location.href = '/login'
+        }, 1000) 
+      }, 1000)
+    }
   }
 
   const TabletNav = () => (
@@ -228,7 +287,6 @@ export default function POSPage() {
           <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 shrink-0 gap-4">
             <TabletNav />
             <div className="flex items-center gap-2 shrink-0">
-              {/* 🌟 เปลี่ยนปุ่มให้คลิกแล้วเปิด Modal กรอก PIN */}
               <button onClick={() => { setPinInput(''); setIsPinModalOpen(true); }} className="bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-3 rounded-2xl font-bold border border-amber-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
                 🔓 <span className="hidden xl:inline">เปิดลิ้นชัก (Manual)</span>
               </button>
@@ -396,7 +454,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🖨️ โซนแสดงผลการพิมพ์ (เหมือนเดิม) */}
+      {/* 🖨️ โซนแสดงผลการพิมพ์ (Fallback สำหรับบน PC Desktop) */}
       {closeShiftSlip ? (
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
       ) : printReceipt && !printReceipt.isManualKick && (
@@ -406,7 +464,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🖨️ หน้าว่าง สำหรับเตะลิ้นชักแบบ Manual */}
+      {/* 🖨️ หน้าว่าง สำหรับเตะลิ้นชักแบบ Manual (Fallback สำหรับ PC) */}
       {printReceipt && printReceipt.isManualKick && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
     </>
   )
