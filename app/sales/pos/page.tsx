@@ -111,8 +111,8 @@ export default function POSPage() {
           setPrintReceipt(null); 
           clearCart(); 
           fetchActiveProducts() // 🔄 รีเฟรชยอดคลังบนหน้าจอ
-        }, 500) 
-      }, 300)
+        }, 1000) 
+      }, 1000)
     }
   }
 
@@ -198,8 +198,8 @@ export default function POSPage() {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
         localStorage.removeItem('kingsawang_session')
         window.location.href = '/login'
-      }, 500) 
-    }, 300)
+      }, 1000) 
+    }, 1000)
   }
 
   const TabletNav = () => (
