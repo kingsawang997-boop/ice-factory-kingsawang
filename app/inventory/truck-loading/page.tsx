@@ -27,9 +27,9 @@ export default function TruckLoadingPage() {
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
-  // 🌟 --- Return / Settlement State (รวมบิลตามสายรถ) ---
+  // --- Return / Settlement State ---
   const [pendingGroups, setPendingGroups] = useState<any[]>([])
-  const [selectedRouteKey, setSelectedRouteKey] = useState('') // ใช้ชื่อสายรถเป็น Key หลัก
+  const [selectedRouteKey, setSelectedRouteKey] = useState('')
   const [returnItems, setReturnItems] = useState<any[]>([])
   const [bagForm, setBagForm] = useState({ returnedEmptyBags: '', pendingBags: '', note: '' })
   const [isLoadingPending, setIsLoadingPending] = useState(false)
@@ -66,7 +66,6 @@ export default function TruckLoadingPage() {
     setIsLoadingHistory(false)
   }
 
-  // 🌟 ดึงบิลที่รอเคลียร์ และจัดกลุ่มรวมตาม "สายรถ (routeName)"
   const fetchPendingRoutesGrouped = async () => {
     setIsLoadingPending(true)
     const { data } = await supabase.from('route_settlements').select('*').eq('status', 'pending').order('createdAt', { ascending: true })
@@ -89,8 +88,41 @@ export default function TruckLoadingPage() {
     setIsLoadingPending(false)
   }
 
-  const addToCart = (product: any) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
+  // 🌟 ฟังก์ชันใหม่: เด้งหน้าต่างให้พิมพ์จำนวนทันทีที่กดเลือกสินค้า
+  const handleProductClick = (product: any) => {
+    const qtyInput = window.prompt(`ระบุจำนวน "${product.name}" ที่ต้องการเบิกขึ้นรถ:`, '1')
+    if (qtyInput === null) return // กด Cancel
+    
+    const qty = parseInt(qtyInput, 10)
+    if (isNaN(qty) || qty <= 0) {
+      return alert('❌ กรุณาระบุจำนวนเป็นตัวเลขให้ถูกต้อง')
+    }
+
+    setCart(prev => {
+      const existing = prev.find(i => i.id === product.id)
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, qty: existing.qty + qty } : i)
+      }
+      return [...prev, { ...product, qty }]
+    })
+  }
+
   const updateQty = (id: string, delta: number) => { setCart(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)) }
+  
+  // 🌟 ฟังก์ชันใหม่: พิมพ์แก้จำนวนในตะกร้าได้โดยตรง
+  const editCartQty = (id: string, currentQty: number) => {
+    const qtyInput = window.prompt('ระบุจำนวนใหม่ที่ต้องการ:', currentQty.toString())
+    if (qtyInput === null) return
+    const qty = parseInt(qtyInput, 10)
+    if (isNaN(qty) || qty < 0) return alert('❌ กรุณาระบุจำนวนเป็นตัวเลขให้ถูกต้อง')
+    
+    if (qty === 0) {
+      removeFromCart(id)
+    } else {
+      setCart(prev => prev.map(i => i.id === id ? { ...i, qty } : i))
+    }
+  }
+
   const removeFromCart = (id: string) => setCart(prev => prev.filter(i => i.id !== id))
 
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0)
@@ -196,11 +228,9 @@ export default function TruckLoadingPage() {
     fetchHistory(); fetchProducts()
   }
 
-  // 🌟 --- เลือกรถเพื่อรวมยอดทุกกะมาแสดง ---
   const handleSelectRouteGroup = (group: any) => {
     setSelectedRouteKey(group.routeName)
     
-    // รวมสินค้าจากทุกกะเข้าด้วยกัน
     const itemMap: { [productId: string]: any } = {}
     group.records.forEach((rec: any) => {
       const items = rec.details?.items || rec.details?.loadedItems || []
@@ -208,12 +238,8 @@ export default function TruckLoadingPage() {
         const pId = i.productId || i.id
         if (!itemMap[pId]) {
           itemMap[pId] = {
-            productId: pId,
-            name: i.name,
-            price: i.price,
-            loadedQty: 0,
-            returnedQty: 0,
-            damagedQty: 0
+            productId: pId, name: i.name, price: i.price,
+            loadedQty: 0, returnedQty: 0, damagedQty: 0
           }
         }
         itemMap[pId].loadedQty += Number(i.loadedQty || i.qty || 0)
@@ -239,15 +265,11 @@ export default function TruckLoadingPage() {
     }))
   }
 
-  const totalCalculatedSales = returnItems.reduce((sum, item) => sum + ((item.loadedQty - item.returnedQty - item.damagedQty) * item.price), 0)
-
-  // 🌟 บันทึกเคลียร์ยอด (อัปเดตทุกบิลของรถคันนี้ให้เป็น completed พร้อมเก็บกระสอบ)
   const submitSettlement = async () => {
     const group = pendingGroups.find(g => g.routeName === selectedRouteKey)
     if (!group) return
-    if (!confirm('ยืนยันการเคลียร์ยอดและรับคืนสินค้าทั้งหมดของรถคันนี้?')) return
+    if (!confirm('ยืนยันบันทึกสินค้าเหลือกลับและคืนสต๊อก?\n(ข้อมูลจะถูกส่งต่อไปยังบัญชีเพื่อสรุปยอดเงิน)')) return
 
-    // 1. อัปเดตทุกบิลในกลุ่มให้เป็น completed
     const updatePromises = group.records.map(async (record: any) => {
       return supabase.from('route_settlements').update({
         status: 'completed',
@@ -256,7 +278,6 @@ export default function TruckLoadingPage() {
     })
     await Promise.all(updatePromises)
 
-    // 2. คืนสต๊อกสินค้าที่เหลือกลับเข้าคลัง
     const stockPromises = returnItems.filter(i => i.returnedQty > 0).map(async (item) => {
       const { data: currentProd } = await supabase.from('products').select('stock').eq('id', item.productId).single()
       if (currentProd) {
@@ -265,14 +286,13 @@ export default function TruckLoadingPage() {
       }
     })
 
-    // 3. บันทึก Log
     const logPromises = returnItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
       const logs = []
       if (item.returnedQty > 0) {
         logs.push(supabase.from('inventory_logs').insert([{
           id: `LOG-RET-${Date.now()}-${item.productId.slice(-4)}`,
           productId: item.productId, productName: item.name, type: 'IN', qty: item.returnedQty,
-          note: `รับคืนจากรถ ${group.routeName} (เคลียร์ยอดรวมทุกกะ)`, by: employeeName
+          note: `รับคืนจากรถ ${group.routeName} (เคลียร์ยอดรวม)`, by: employeeName
         }]))
       }
       if (item.damagedQty > 0) {
@@ -287,7 +307,7 @@ export default function TruckLoadingPage() {
 
     await Promise.all([...stockPromises, ...logPromises])
 
-    alert('✅ บันทึกเคลียร์ยอดและรับของคืนเข้าคลังเรียบร้อยแล้ว!')
+    alert('✅ บันทึกยอดสินค้าและรับของคืนเข้าคลังเรียบร้อยแล้ว!\n(ข้อมูลพร้อมให้ฝ่ายบัญชีสรุปยอดเงินแล้ว)')
     setSelectedRouteKey('')
     fetchPendingRoutesGrouped()
     fetchProducts()
@@ -329,7 +349,7 @@ export default function TruckLoadingPage() {
             <div className="flex-1 overflow-y-auto pr-2 pb-24 md:pb-0 scrollbar-hide">
               <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {products.map(product => (
-                  <button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-5 rounded-[2rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">
+                  <button key={product.id} onClick={() => handleProductClick(product)} className="flex flex-col items-center p-5 rounded-[2rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">
                     {product.image ? (
                       <div className="w-16 h-16 md:w-20 md:h-20 mb-3 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white border border-slate-100"><img src={product.image} className="w-full h-full object-cover" /></div>
                     ) : (<span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{product.icon}</span>)}
@@ -376,7 +396,12 @@ export default function TruckLoadingPage() {
                     <div className="flex items-center gap-3">
                       <div className="flex items-center bg-slate-100 rounded-xl p-1 border border-slate-200">
                         <button onClick={() => updateQty(item.id, -1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">-</button>
-                        <span className="w-8 text-center font-black text-base text-blue-600">{item.qty}</span>
+                        
+                        {/* 🌟 ปุ่มตัวเลข กดแล้วพิมพ์แก้ได้เลย */}
+                        <button onClick={() => editCartQty(item.id, item.qty)} className="w-10 text-center font-black text-base text-blue-600 hover:bg-blue-100 rounded px-1 transition-colors">
+                          {item.qty}
+                        </button>
+
                         <button onClick={() => updateQty(item.id, 1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">+</button>
                       </div>
                       <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-rose-500 font-black text-lg px-2">✕</button>
@@ -400,10 +425,8 @@ export default function TruckLoadingPage() {
         </div>
 
       ) : activeTab === 'return' ? (
-        /* 🌟 === RETURN / SETTLEMENT TAB (รวมทุกกะ + กระสอบเปล่า/ค้าง) === */
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
           
-          {/* ซ้าย: เลือกรถที่กลับมา (รวมยอดทุกกะ) */}
           <div className="w-full md:w-[350px] bg-white border-r border-slate-200 shadow-sm flex flex-col h-full shrink-0">
             <div className="p-5 border-b border-slate-100 bg-slate-50"><h2 className="font-black text-slate-900 text-base">🚛 เลือกรถที่กลับมาส่งยอด</h2></div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -422,31 +445,27 @@ export default function TruckLoadingPage() {
             </div>
           </div>
 
-          {/* ขวา: ฟอร์มเคลียร์ยอด (รวมทุกกะ + ช่องคืนกระสอบ) */}
           <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
             {!selectedRouteKey ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-6xl">📝</span><p className="font-bold text-lg">เลือกรถจากเมนูด้านซ้ายเพื่อเริ่มเคลียร์ยอด</p></div>
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-6xl">📝</span><p className="font-bold text-lg">เลือกรถจากเมนูด้านซ้ายเพื่อเริ่มเช็คของคืน</p></div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4 md:p-8">
-                <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
+                <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto flex flex-col">
                   
-                  {/* หัวบิล */}
                   <div className="p-6 border-b border-slate-200 bg-white">
-                    <h2 className="text-xl font-black text-slate-800 mb-2">ตรวจสอบสินค้าเหลือกลับ & เคลียร์ยอด (รวมทุกกะ)</h2>
+                    <h2 className="text-xl font-black text-slate-800 mb-2">ตรวจสอบสินค้าเหลือกลับ & คืนกระสอบ (รวมทุกกะ)</h2>
                     <p className="text-sm font-bold text-slate-500">สายรถ: <span className="text-blue-600">{selectedRouteKey}</span></p>
                   </div>
 
-                  {/* ตารางสินค้า */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                       <thead className="bg-slate-100 border-b-2 border-slate-200 text-slate-600 text-xs">
                         <tr>
                           <th className="p-4 font-bold">สินค้า</th>
-                          <th className="p-4 font-black text-center w-24">เบิกไป (รวม)</th>
+                          <th className="p-4 font-black text-center w-32">เบิกไป (รวม)</th>
                           <th className="p-4 font-bold text-center w-32 text-orange-600">คืน (ดี)</th>
                           <th className="p-4 font-bold text-center w-32 text-rose-600">เสีย/ละลาย</th>
-                          <th className="p-4 font-black text-right w-24 text-emerald-600">ขายได้</th>
-                          <th className="p-4 font-bold text-right w-28">รวมเงิน</th>
+                          <th className="p-4 font-black text-right w-32 text-emerald-600">ขายได้ (ยอดส่ง)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -455,11 +474,10 @@ export default function TruckLoadingPage() {
                           return (
                             <tr key={idx} className="hover:bg-slate-50">
                               <td className="p-4 font-bold text-slate-700 text-sm">{item.name}</td>
-                              <td className="p-4 font-black text-center text-lg">{item.loadedQty}</td>
-                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.returnedQty || ''} onChange={e => updateReturnQty(item.productId, 'returnedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-orange-200 focus:border-orange-500 rounded-xl py-2 font-black text-orange-700 outline-none" /></td>
-                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.damagedQty || ''} onChange={e => updateReturnQty(item.productId, 'damagedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-rose-200 focus:border-rose-500 rounded-xl py-2 font-black text-rose-700 outline-none" /></td>
-                              <td className="p-4 font-black text-right text-lg text-emerald-600">{soldQty}</td>
-                              <td className="p-4 font-black text-right text-slate-800">{(soldQty * item.price).toLocaleString()}</td>
+                              <td className="p-4 font-black text-center text-xl">{item.loadedQty}</td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.returnedQty === 0 ? '' : item.returnedQty} onChange={e => updateReturnQty(item.productId, 'returnedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-orange-200 focus:border-orange-500 rounded-xl py-2 font-black text-orange-700 outline-none" /></td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.damagedQty === 0 ? '' : item.damagedQty} onChange={e => updateReturnQty(item.productId, 'damagedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-rose-200 focus:border-rose-500 rounded-xl py-2 font-black text-rose-700 outline-none" /></td>
+                              <td className="p-4 font-black text-right text-xl text-emerald-600">{soldQty}</td>
                             </tr>
                           )
                         })}
@@ -467,7 +485,6 @@ export default function TruckLoadingPage() {
                     </table>
                   </div>
 
-                  {/* 🌟 เพิ่มส่วนรับคืนกระสอบเปล่า & กระสอบค้าง */}
                   <div className="p-6 bg-slate-50 border-t-2 border-slate-200 space-y-6">
                     <h3 className="font-black text-slate-700">📦 การจัดการกระสอบเปล่า / กระสอบค้าง</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -485,13 +502,9 @@ export default function TruckLoadingPage() {
                       <input type="text" value={bagForm.note} onChange={e => setBagForm({...bagForm, note: e.target.value})} placeholder="ระบุรายละเอียดเพิ่มเติม..." className="w-full border border-slate-300 rounded-xl p-3 font-bold text-sm bg-white outline-none focus:border-blue-500" />
                     </div>
 
-                    <div className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm gap-4">
-                      <div>
-                        <p className="text-xs font-bold text-slate-400">ยอดขายรวมสุทธิ (ทุกกะ)</p>
-                        <p className="text-4xl font-black text-blue-600">{totalCalculatedSales.toLocaleString()} <span className="text-sm font-bold text-slate-600">บาท</span></p>
-                      </div>
-                      <button onClick={submitSettlement} className="w-full md:w-auto bg-slate-900 hover:bg-black text-white font-black py-4 px-8 rounded-xl shadow-lg transition-transform active:scale-95 text-base flex items-center justify-center gap-2">
-                        💾 บันทึกรับคืนสินค้า & กระสอบเข้าคลัง
+                    <div className="flex justify-end items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm mt-4">
+                      <button onClick={submitSettlement} className="w-full md:w-auto bg-slate-900 hover:bg-black text-white font-black py-4 px-12 rounded-xl shadow-lg transition-transform active:scale-95 text-base flex items-center justify-center gap-2">
+                        💾 บันทึกรับคืนสินค้าเข้าคลัง (ส่งยอดให้บัญชี)
                       </button>
                     </div>
                   </div>
@@ -503,7 +516,6 @@ export default function TruckLoadingPage() {
         </div>
 
       ) : (
-        /* === HISTORY TAB === */
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/50">
           <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm max-w-6xl mx-auto animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-100 pb-4 gap-4">
