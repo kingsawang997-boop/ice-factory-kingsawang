@@ -38,7 +38,7 @@ export default function RouteSettlementPage() {
     const session = localStorage.getItem('kingsawang_session')
     if (session) setCashierName(JSON.parse(session).name)
     fetchLivePrices()
-    fetchTruckRoutes() // 🌟 ดึงข้อมูลรถตอนเปิดหน้า
+    fetchTruckRoutes()
   }, [])
 
   useEffect(() => {
@@ -79,31 +79,46 @@ export default function RouteSettlementPage() {
   const fetchTruckLoadingData = async () => {
     setIsPullingData(true)
     
+    // 🌟 เปลี่ยนไปดึงสถานะ 'completed' ที่ฝ่ายคลังเช็คของคืนเรียบร้อยแล้ว
     const { data } = await supabase
       .from('route_settlements')
       .select('details')
       .eq('routeName', selectedTruck)
       .eq('date', reportDate)
-      .eq('status', 'pending')
+      .eq('status', 'completed')
 
     let iceBags = 0, packs = 0, w1500 = 0, w600 = 0, w350 = 0
+    let retIce = 0, dmgIce = 0, retPacks = 0, ret1500 = 0, ret600 = 0, ret350 = 0
 
     if (data && data.length > 0) {
       data.forEach(record => {
         const itemsList = record.details?.loadedItems || record.details?.items || []
         itemsList.forEach((item: any) => {
           const qty = Number(item.loadedQty || item.qty || 0)
+          const returned = Number(item.returnedQty || 0)
+          const damaged = Number(item.damagedQty || 0)
           const name = item.name || ''
-          if (name.includes('แพ็ค')) packs += qty
-          else if (name.includes('1500')) w1500 += qty
-          else if (name.includes('600')) w600 += qty
-          else if (name.includes('350')) w350 += qty
-          else iceBags += qty 
+          
+          // ดึงยอดที่รับคืนและเสียหายมาด้วย
+          if (name.includes('แพ็ค')) { packs += qty; retPacks += (returned + damaged) }
+          else if (name.includes('1500')) { w1500 += qty; ret1500 += (returned + damaged) }
+          else if (name.includes('600')) { w600 += qty; ret600 += (returned + damaged) }
+          else if (name.includes('350')) { w350 += qty; ret350 += (returned + damaged) }
+          else { 
+            iceBags += qty
+            retIce += returned
+            dmgIce += damaged
+          }
         })
       })
     }
     
     setMorningLoad({ totalIceBags: iceBags, icePacks: packs, water1500: w1500, water600: w600, water350: w350 })
+    
+    // 🌟 กรอกยอดของคืนเข้าฟอร์มให้อัตโนมัติ (บัญชีไม่ต้องพิมพ์ใหม่)
+    setIceData(prev => ({ ...prev, returned: retIce, melted: dmgIce }))
+    setPackReturns({ icePacks: retPacks, water1500: ret1500, water600: ret600, water350: ret350 })
+
     setIsPullingData(false)
   }
 
@@ -153,7 +168,8 @@ export default function RouteSettlementPage() {
       status: 'received' 
     }
 
-    await supabase.from('route_settlements').update({ status: 'cleared_by_summary' }).eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'pending')
+    // 🌟 อัปเดตสถานะบิลของคลังจาก completed -> cleared_by_summary
+    await supabase.from('route_settlements').update({ status: 'cleared_by_summary' }).eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
 
     const { error } = await supabase.from('route_settlements').insert([newSettlement])
     if (error) alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message)
@@ -238,8 +254,8 @@ export default function RouteSettlementPage() {
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10"></div>}
                   <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-end mb-2"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-blue-500">🧊</span> กระทบยอดกระสอบ</h2><span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider border ${bagDifference === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse'}`}>{bagDifference === 0 ? '✓ กระสอบครบ' : bagDifference > 0 ? `⚠️ หาย ${bagDifference} ใบ` : `❓ เกิน ${Math.abs(bagDifference)} ใบ`}</span></div>
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600">กระสอบส่งคืนคลัง</label><input type="number" value={iceData.returned || ''} onChange={e => updateIce('returned', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-slate-200 text-center font-bold focus:border-blue-500 outline-none" placeholder="0" /></div>
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted || ''} onChange={e => updateIce('melted', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none" placeholder="0" /></div>
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600">กระสอบส่งคืนคลัง</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} onChange={e => updateIce('returned', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-slate-200 text-center font-bold focus:border-blue-500 outline-none bg-slate-50" placeholder="0" /></div>
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} onChange={e => updateIce('melted', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none" placeholder="0" /></div>
                     <div className="pt-3 space-y-3">
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold text-emerald-700 focus:border-emerald-500 outline-none" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-600">ขายได้ (ราคา {adminSettings.icePrice2}.-)</label><input type="number" value={iceData.sold40 || ''} onChange={e => updateIce('sold40', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold text-emerald-700 focus:border-emerald-500 outline-none" placeholder="0" /></div>
@@ -274,7 +290,7 @@ export default function RouteSettlementPage() {
                     ].map((item, idx) => (
                       <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                         <div className="flex justify-between items-center mb-3"><span className="font-bold text-slate-800">{item.label}</span><span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded shadow-sm border border-slate-100">เบิกรวมวันนี้: <span className="text-blue-600">{item.load}</span></span></div>
-                        <div className="flex items-center gap-3"><span className="text-[10px] text-slate-500 whitespace-nowrap">นำมาคืน:</span><input type="number" value={packReturns[item.field as keyof typeof packReturns] || ''} onChange={e => updatePack(item.field as keyof typeof packReturns, e.target.value)} className="w-full p-2 rounded-xl border border-slate-200 text-center font-bold outline-none focus:border-blue-500" placeholder="0" /><div className="flex flex-col items-end bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100"><span className="text-[10px] text-emerald-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span><span className="text-[9px] text-emerald-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span></div></div>
+                        <div className="flex items-center gap-3"><span className="text-[10px] text-slate-500 whitespace-nowrap">นำมาคืน:</span><input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} onChange={e => updatePack(item.field as keyof typeof packReturns, e.target.value)} className="w-full p-2 rounded-xl border border-slate-200 text-center font-bold outline-none focus:border-blue-500 bg-white" placeholder="0" /><div className="flex flex-col items-end bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100"><span className="text-[10px] text-emerald-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span><span className="text-[9px] text-emerald-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span></div></div>
                       </div>
                     ))}
                   </div>
