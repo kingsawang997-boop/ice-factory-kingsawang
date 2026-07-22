@@ -66,32 +66,37 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันขั้นเทพ: เตะลิ้นชัก + แปลงฟอนต์ไทย (CP874) แบบฝังในตัว
+  // 🚀 ฟังก์ชันขั้นเทพ: ปิดโหมดจีน + เตะลิ้นชัก + แปลงฟอนต์ไทย (CP874)
   const getRawBTUrl = (text: string) => {
-    // 1. รหัสภาษาเครื่องสำหรับเตะลิ้นชัก (ESC p 0 60 255)
-    const kickDrawerBytes = [27, 112, 0, 60, 255]; 
+    // 1. ชุดคำสั่งภาษาเครื่อง (ESC/POS Commands)
+    const initBytes = [
+      27, 64,       // ESC @ : รีเซ็ตเครื่องปริ้น ล้างค่าเก่าที่ค้างอยู่
+      28, 46,       // FS .  : 🌟 คำสั่งปิดโหมดภาษาจีน (สำคัญที่สุด)
+      27, 116, 21,  // ESC t 21 : บังคับเปลี่ยน Code Page เป็นภาษาไทย (CP874)
+      27, 112, 0, 60, 255 // ESC p : สั่งเตะลิ้นชักเก็บเงิน
+    ];
     
-    // 2. แปลงภาษาไทย (UTF-8) ให้เป็นภาษาที่เครื่องปริ้นสลิปเข้าใจ (CP874 / TIS-620)
+    // 2. แปลงข้อความภาษาไทยให้เป็นรหัสที่เครื่องปริ้นสลิปเข้าใจ (CP874)
     const textBytes = [];
     for (let i = 0; i < text.length; i++) {
       const charCode = text.charCodeAt(i);
       
       if (charCode >= 0x0E00 && charCode <= 0x0E7F) {
-        // ถ้าเป็นอักษร/สระภาษาไทย ให้แปลงรหัสข้ามไปเป็น CP874
+        // ถ้าเป็นอักษรภาษาไทย
         textBytes.push(charCode - 0x0E00 + 0xA0);
       } else if (charCode < 128) {
-        // ถ้าเป็นภาษาอังกฤษ ตัวเลข การเว้นวรรค หรือขึ้นบรรทัดใหม่ (ASCII) ปล่อยผ่าน
+        // ถ้าเป็นภาษาอังกฤษ ตัวเลข หรือเว้นวรรค
         textBytes.push(charCode);
       } else {
-        // สัญลักษณ์แปลกๆ ที่เครื่องปริ้นไม่รู้จัก ให้แทนด้วย '?' เพื่อป้องกันเครื่องเอ๋อ
+        // ตัวอักษรแปลกๆ ที่อ่านไม่ได้ ให้แทนด้วย '?'
         textBytes.push(63); 
       }
     }
     
-    // 3. เอาคำสั่งเตะลิ้นชัก มารวมกับข้อความใบเสร็จที่แปลงภาษาแล้ว
-    const combined = new Uint8Array([...kickDrawerBytes, ...textBytes]);
+    // 3. เอาชุดคำสั่ง (ข้อ 1) มาต่อกับ ข้อความใบเสร็จ (ข้อ 2)
+    const combined = new Uint8Array([...initBytes, ...textBytes]);
     
-    // 4. บีบอัดเป็น Base64 แล้วส่งยิงตรงเข้าแอป RawBT
+    // 4. แปลงเป็น Base64 ส่งยิงตรงทะลุแอป RawBT
     let binaryString = '';
     for (let i = 0; i < combined.length; i++) {
       binaryString += String.fromCharCode(combined[i]);
