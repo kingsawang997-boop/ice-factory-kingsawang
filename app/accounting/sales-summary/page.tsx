@@ -12,27 +12,25 @@ export default function RouteSettlementPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  // 🌟 State เก็บข้อมูลรถจาก Database
   const [truckRoutes, setTruckRoutes] = useState<any[]>([])
-
   const [selectedTruck, setSelectedTruck] = useState('')
   const [reportDate, setReportDate] = useState(getTodayString())
   const [isPullingData, setIsPullingData] = useState(false)
 
-  const [adminSettings, setAdminSettings] = useState({
-    icePrice1: 45, icePrice2: 40, icePrice3: 35,
-    icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45
-  })
-
-  const [morningLoad, setMorningLoad] = useState({
-    totalIceBags: 0, icePacks: 0, water1500: 0, water600: 0, water350: 0
-  })
-
+  const [adminSettings, setAdminSettings] = useState({ icePrice1: 45, icePrice2: 40, icePrice3: 35, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 })
+  const [morningLoad, setMorningLoad] = useState({ totalIceBags: 0, icePacks: 0, water1500: 0, water600: 0, water350: 0 })
   const [iceData, setIceData] = useState({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
   const [packReturns, setPackReturns] = useState({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
   const [finance, setFinance] = useState({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
-
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
+
+  // 🌟 State สำหรับระบบลูกหนี้ (ป๊อปอัป ค้างรายเดือน)
+  const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
+  const [debtorsList, setDebtorsList] = useState<any[]>([])
+  const [tempDebtorId, setTempDebtorId] = useState('')
+  const [tempDebtAmount, setTempDebtAmount] = useState('')
+  const [selectedDebtorId, setSelectedDebtorId] = useState('')
+  const [selectedDebtorName, setSelectedDebtorName] = useState('')
 
   useEffect(() => {
     const session = localStorage.getItem('kingsawang_session')
@@ -43,11 +41,10 @@ export default function RouteSettlementPage() {
 
   useEffect(() => {
     if (selectedTruck) {
-      // เคลียร์ค่าให้เป็น 0 ก่อนดึงข้อมูลใหม่
       setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
       setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
       setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
-      
+      setSelectedDebtorId(''); setSelectedDebtorName('')
       fetchTruckLoadingData()
     }
   }, [selectedTruck, reportDate])
@@ -70,25 +67,17 @@ export default function RouteSettlementPage() {
     const { data } = await supabase.from('truck_routes').select('*').eq('isActive', true).order('id')
     if (data) {
       setTruckRoutes(data)
-      if(data.length > 0 && !selectedTruck) {
-        setSelectedTruck(`${data[0].route_name} (คนขับ: ${data[0].driver_name})`)
-      }
+      if(data.length > 0 && !selectedTruck) setSelectedTruck(`${data[0].route_name} (คนขับ: ${data[0].driver_name})`)
     }
   }
 
   const fetchTruckLoadingData = async () => {
     setIsPullingData(true)
-    
-    // ดึงบิลที่ฝ่ายคลังเช็คของคืนแล้ว (completed)
-    const { data } = await supabase
-      .from('route_settlements')
-      .select('details')
-      .eq('routeName', selectedTruck)
-      .eq('date', reportDate)
-      .eq('status', 'completed')
+    const { data } = await supabase.from('route_settlements').select('details').eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
 
     let iceBags = 0, packs = 0, w1500 = 0, w600 = 0, w350 = 0
     let retIce = 0, dmgIce = 0, retPacks = 0, ret1500 = 0, ret600 = 0, ret350 = 0
+    let retEmptyBags = 0, pendingBags = 0
 
     if (data && data.length > 0) {
       data.forEach(record => {
@@ -99,42 +88,53 @@ export default function RouteSettlementPage() {
           const damaged = Number(item.damagedQty || 0)
           const name = item.name || ''
           
-          // ดึงยอดรับคืนและของเสียมาเก็บไว้
           if (name.includes('แพ็ค') && name.includes('น้ำแข็ง')) { packs += qty; retPacks += (returned + damaged) }
           else if (name.includes('1500')) { w1500 += qty; ret1500 += (returned + damaged) }
           else if (name.includes('600')) { w600 += qty; ret600 += (returned + damaged) }
           else if (name.includes('350')) { w350 += qty; ret350 += (returned + damaged) }
-          else { 
-            iceBags += qty
-            retIce += returned
-            dmgIce += damaged
-          }
+          else { iceBags += qty; retIce += returned; dmgIce += damaged }
         })
+
+        if(record.details?.bagTracking) {
+          retEmptyBags += Number(record.details.bagTracking.returnedEmptyBags || 0)
+          pendingBags += Number(record.details.bagTracking.pendingBags || 0)
+        }
       })
     }
     
-    // บันทึกยอดตั้งต้น (Gross Load)
     setMorningLoad({ totalIceBags: iceBags, icePacks: packs, water1500: w1500, water600: w600, water350: w350 })
-    
-    // 🌟 กรอกยอดของคืนและของเสียให้อัตโนมัติ (ดึงมาจากหน้าคลัง)
-    setIceData(prev => ({ ...prev, returned: retIce, melted: dmgIce }))
+    setIceData(prev => ({ ...prev, returned: retIce, melted: dmgIce, customerOweBags: pendingBags, returnEmptyBags: retEmptyBags }))
     setPackReturns({ icePacks: retPacks, water1500: ret1500, water600: ret600, water350: ret350 })
 
     setIsPullingData(false)
   }
 
-  // =====================================
-  // 🧮 LOGIC การคำนวณ (ปรับใหม่ตามยอดสุทธิ)
-  // =====================================
-  // 1. ยอดเบิกกระสอบสุทธิ (หลังหักคืนคลัง) - ใช้สำหรับแสดงผลและคำนวณส่วนต่าง
+  // 🌟 ฟังก์ชันจัดการป๊อปอัปเลือกลูกหนี้
+  const openDebtorModal = async () => {
+    const { data } = await supabase.from('debtors').select('*').order('name')
+    if (data) setDebtorsList(data)
+    setIsDebtorModalOpen(true)
+  }
+
+  const confirmDebtor = () => {
+    if (!tempDebtorId || !tempDebtAmount) return alert('กรุณาเลือกลูกหนี้และระบุยอดเงินให้ครบถ้วน')
+    const debtorInfo = debtorsList.find(d => d.id === tempDebtorId)
+    if(debtorInfo) {
+      setSelectedDebtorId(debtorInfo.id)
+      setSelectedDebtorName(debtorInfo.name)
+      setFinance(prev => ({ ...prev, monthlyArrears: Number(tempDebtAmount) }))
+      setIsDebtorModalOpen(false)
+    }
+  }
+
+  const cancelDebtor = () => {
+    setSelectedDebtorId(''); setSelectedDebtorName(''); setTempDebtorId(''); setTempDebtAmount('')
+    setFinance(prev => ({ ...prev, monthlyArrears: 0 }))
+  }
+
   const netIceBags = Math.max(0, morningLoad.totalIceBags - iceData.returned)
-
-  // 2. ยอดที่ขายและใช้งานไป (ไม่รวมยอดคืนคลัง เพราะหักไปแล้วใน netIceBags)
   const accountedIceBags = iceData.melted + iceData.service + iceData.sold45 + iceData.sold40 + iceData.sold35
-  
-  // 3. ส่วนต่างกระสอบ (ควรเป็น 0)
   const bagDifference = netIceBags - accountedIceBags
-
   const iceRevenue = (iceData.sold45 * adminSettings.icePrice1) + (iceData.sold40 * adminSettings.icePrice2) + (iceData.sold35 * adminSettings.icePrice3)
 
   const totalSoldAndServiceBags = iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.service
@@ -145,14 +145,12 @@ export default function RouteSettlementPage() {
   const waterSold1500 = Math.max(0, morningLoad.water1500 - packReturns.water1500)
   const waterSold600 = Math.max(0, morningLoad.water600 - packReturns.water600)
   const waterSold350 = Math.max(0, morningLoad.water350 - packReturns.water350)
-  
-  const icePackRevenue = icePackSold * adminSettings.icePackPrice
-  const waterRevenue = (waterSold1500 * adminSettings.waterPrice1500) + (waterSold600 * adminSettings.waterPrice600) + (waterSold350 * adminSettings.waterPrice350)
-  const totalPackRevenue = icePackRevenue + waterRevenue
+  const totalPackRevenue = (icePackSold * adminSettings.icePackPrice) + (waterSold1500 * adminSettings.waterPrice1500) + (waterSold600 * adminSettings.waterPrice600) + (waterSold350 * adminSettings.waterPrice350)
 
   const totalRevenue = iceRevenue + totalPackRevenue
-  const totalDeductions = finance.transfer + finance.payArrears + finance.dailyArrears + finance.monthlyArrears
-  const expectedCash = Math.max(0, totalRevenue - totalDeductions)
+  
+  // 🌟 แก้ไขสูตรคำนวณเงิน: บวกจ่ายค้าง(หนี้เก่า) และหักรายการอื่นออก
+  const expectedCash = Math.max(0, totalRevenue + finance.payArrears - finance.transfer - finance.dailyArrears - finance.monthlyArrears)
   const cashDifference = finance.actualCash - expectedCash
 
   const updateIce = (field: keyof typeof iceData, value: string) => setIceData(prev => ({ ...prev, [field]: Number(value) }))
@@ -166,33 +164,34 @@ export default function RouteSettlementPage() {
       if (!confirmSave) return
     }
 
+    const docNo = `SET-${Date.now().toString().slice(-6)}`
+    
+    // 🌟 ระบบบันทึกหนี้สินเข้าไปในฐานข้อมูลลูกหนี้
+    if (finance.monthlyArrears > 0 && selectedDebtorId) {
+      const { data: debtorData } = await supabase.from('debtors').select('total_debt').eq('id', selectedDebtorId).single()
+      if (debtorData) {
+        await supabase.from('debtor_transactions').insert([{
+          id: `TRX-${Date.now()}`, debtor_id: selectedDebtorId, date: reportDate, type: 'borrow',
+          amount: finance.monthlyArrears, note: `ค้างค่าน้ำแข็ง สายส่ง: ${selectedTruck} (บิล ${docNo})`, by: cashierName
+        }])
+        await supabase.from('debtors').update({ total_debt: Number(debtorData.total_debt || 0) + Number(finance.monthlyArrears) }).eq('id', selectedDebtorId)
+      }
+    }
+
     const monthlyReportData = {
       date: reportDate, truck: selectedTruck,
       revenue: { iceSales: iceRevenue, packSales: totalPackRevenue, total: totalRevenue },
-      bagTracking: { 
-        grossLoad: morningLoad.totalIceBags,
-        netLoad: netIceBags,
-        returnedToStock: iceData.returned,
-        melted: iceData.melted,
-        soldAndService: totalSoldAndServiceBags, 
-        customerOwe: iceData.customerOweBags, 
-        customerReturnOld: iceData.customerReturnOldBags, 
-        expectedReturn: expectedEmptyBags, 
-        actualReturn: iceData.returnEmptyBags, 
-        lostBagsToDeduct: lostEmptyBags 
-      },
+      bagTracking: { grossLoad: morningLoad.totalIceBags, netLoad: netIceBags, returnedToStock: iceData.returned, melted: iceData.melted, soldAndService: totalSoldAndServiceBags, customerOwe: iceData.customerOweBags, customerReturnOld: iceData.customerReturnOldBags, expectedReturn: expectedEmptyBags, actualReturn: iceData.returnEmptyBags, lostBagsToDeduct: lostEmptyBags },
       cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference }
     }
 
-    const docNo = `SET-${Date.now().toString().slice(-6)}`
     const newSettlement = {
-      id: docNo, date: reportDate, routeName: selectedTruck, expectedAmount: totalRevenue, cashAmount: finance.actualCash, transferAmount: finance.transfer, creditAmount: finance.dailyArrears + finance.monthlyArrears, expenseAmount: finance.payArrears, diffAmount: cashDifference, note: `ถุงหาย: ${lostEmptyBags > 0 ? lostEmptyBags : 0} ใบ`, details: monthlyReportData, by: cashierName,
-      status: 'received' 
+      id: docNo, date: reportDate, routeName: selectedTruck, expectedAmount: totalRevenue, cashAmount: finance.actualCash, transferAmount: finance.transfer, creditAmount: finance.dailyArrears + finance.monthlyArrears, expenseAmount: finance.payArrears, diffAmount: cashDifference, note: `ถุงหาย: ${lostEmptyBags > 0 ? lostEmptyBags : 0} ใบ`, details: monthlyReportData, by: cashierName, status: 'received' 
     }
 
     await supabase.from('route_settlements').update({ status: 'cleared_by_summary' }).eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
-
     const { error } = await supabase.from('route_settlements').insert([newSettlement])
+    
     if (error) alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message)
     else {
       alert(`✅ ปิดยอดสำเร็จ!\nเลขที่บิล: ${docNo}\nเงินสดรับเข้า: ${finance.actualCash.toLocaleString()} บาท\nถุงหาย(รอหักเงิน): ${lostEmptyBags > 0 ? lostEmptyBags : 0} ใบ`)
@@ -201,16 +200,14 @@ export default function RouteSettlementPage() {
   }
 
   // ==========================================
-  // 🎯 TAB 2: ประวัติย้อนหลัง & การพิมพ์
+  // TAB 2: ประวัติย้อนหลัง & การพิมพ์
   // ==========================================
   const [historyDate, setHistoryDate] = useState(getTodayString())
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [printSlip, setPrintSlip] = useState<any>(null)
 
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory()
-  }, [activeTab, historyDate])
+  useEffect(() => { if (activeTab === 'history') fetchHistory() }, [activeTab, historyDate])
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true)
@@ -219,16 +216,9 @@ export default function RouteSettlementPage() {
     setIsLoadingHistory(false)
   }
 
-  const handlePrint = (record: any) => {
-    setPrintSlip(record)
-    setTimeout(() => { window.print(); setTimeout(() => setPrintSlip(null), 500) }, 300)
-  }
-
+  const handlePrint = (record: any) => { setPrintSlip(record); setTimeout(() => { window.print(); setTimeout(() => setPrintSlip(null), 500) }, 300) }
   const handleDelete = async (id: string) => {
-    if(confirm(`⚠️ ต้องการลบบิล ${id} ออกจากระบบถาวรหรือไม่?`)) {
-      await supabase.from('route_settlements').delete().eq('id', id)
-      fetchHistory()
-    }
+    if(confirm(`⚠️ ต้องการลบบิล ${id} ออกจากระบบถาวรหรือไม่?`)) { await supabase.from('route_settlements').delete().eq('id', id); fetchHistory() }
   }
 
   return (
@@ -239,7 +229,7 @@ export default function RouteSettlementPage() {
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div className="space-y-2">
             <h1 className="text-xl md:text-2xl font-black text-slate-900 flex items-center gap-3 tracking-tight"><span className="text-2xl">📝</span> บันทึกสรุปยอดสายส่ง (Sales Summary)</h1>
-            <p className="text-sm text-slate-500 font-medium">ระบบปิดยอดประจำวัน <span className="text-emerald-500 font-bold">(🟢 เชื่อมต่อยอดเบิกสินค้าอัตโนมัติ)</span></p>
+            <p className="text-sm text-slate-500 font-medium">ระบบปิดยอดประจำวัน <span className="text-emerald-500 font-bold">(🟢 เชื่อมต่อยอดเบิกและรับคืนอัตโนมัติ)</span></p>
           </div>
           <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto">
             <button onClick={() => setActiveTab('form')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-bold text-sm transition-all ${activeTab === 'form' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>➕ บันทึกปิดยอดใหม่</button>
@@ -267,7 +257,6 @@ export default function RouteSettlementPage() {
                       return <option key={r.id} value={routeNameFull}>{r.route_name} - คนขับ: {r.driver_name}</option>
                     })}
                   </select>
-                  {/* 🌟 แสดงยอดหลังหักคืนคลัง */}
                   <div className="bg-sky-50 px-4 py-3 rounded-xl border border-sky-100 flex justify-between items-center"><span className="font-bold text-sky-800">ยอดเบิกสุทธิ <span className="text-[10px] text-sky-600 font-normal">(หลังหักคืนคลัง)</span>:</span><span className="text-2xl font-black text-blue-600">{netIceBags} <span className="text-sm">ใบ</span></span></div>
                 </div>
 
@@ -275,9 +264,8 @@ export default function RouteSettlementPage() {
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10"></div>}
                   <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-end mb-2"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-blue-500">🧊</span> กระทบยอดกระสอบ</h2><span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider border ${bagDifference === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse'}`}>{bagDifference === 0 ? '✓ กระสอบครบ' : bagDifference > 0 ? `⚠️ หาย ${bagDifference} ใบ` : `❓ เกิน ${Math.abs(bagDifference)} ใบ`}</span></div>
                   <div className="space-y-3">
-                    {/* 🌟 ช่องคืนคลังไฮไลท์สีเขียวให้รู้ว่าดึงมาอัตโนมัติ */}
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">กระสอบส่งคืนคลัง (ใบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} onChange={e => updateIce('returned', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold focus:border-emerald-500 outline-none bg-emerald-50/50 text-emerald-700" placeholder="0" /></div>
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} onChange={e => updateIce('melted', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none" placeholder="0" /></div>
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">กระสอบส่งคืนคลัง (ใบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} readOnly className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" /></div>
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} readOnly className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none cursor-not-allowed" placeholder="0" /></div>
                     <div className="pt-3 space-y-3 border-t border-slate-100">
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice2}.-)</label><input type="number" value={iceData.sold40 || ''} onChange={e => updateIce('sold40', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
@@ -288,10 +276,10 @@ export default function RouteSettlementPage() {
                   <div className="pt-4 mt-4 border-t-2 border-dashed border-slate-200">
                     <div className="bg-orange-50 p-4 rounded-2xl border border-orange-100 space-y-3">
                       <h3 className="font-black text-orange-800 text-sm flex justify-between items-center mb-1"><span>📦 จัดการถุงเปล่า (คุมถุงหาย)</span><span className="text-[9px] bg-orange-200 text-orange-800 px-2 py-0.5 rounded-md">ขาย+แจก: {totalSoldAndServiceBags} ใบ</span></h3>
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600 text-[10px]">ลูกค้าค้างถุงวันนี้ (ใบ)</label><input type="number" value={iceData.customerOweBags || ''} onChange={e => updateIce('customerOweBags', e.target.value)} className="w-1/2 p-2 rounded-xl border border-orange-200 text-center font-bold text-orange-900 focus:outline-none" placeholder="0" /></div>
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600 text-[10px]">ลูกค้าคืนถุงเก่า (ใบ)</label><input type="number" value={iceData.customerReturnOldBags || ''} onChange={e => updateIce('customerReturnOldBags', e.target.value)} className="w-1/2 p-2 rounded-xl border border-orange-200 text-center font-bold text-orange-900 focus:outline-none" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600 text-[10px]">ลูกค้าค้างถุงวันนี้ (ใบ)</label><input type="number" value={iceData.customerOweBags === 0 ? '' : iceData.customerOweBags} readOnly className="w-1/2 p-2 rounded-xl border border-orange-200 text-center font-bold text-orange-900 bg-orange-50 cursor-not-allowed outline-none" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600 text-[10px]">ลูกค้าคืนถุงเก่า (ใบ)</label><input type="number" value={iceData.customerReturnOldBags || ''} onChange={e => updateIce('customerReturnOldBags', e.target.value)} className="w-1/2 p-2 rounded-xl border border-orange-200 text-center font-bold text-orange-900 focus:outline-none bg-white" placeholder="0" /></div>
                       <div className="flex justify-between items-center py-2 border-y border-orange-200/50"><span className="font-bold text-orange-800 text-[11px]">ถุงเปล่าที่ต้องคืนโรงงาน:</span><span className="font-black text-orange-900">{expectedEmptyBags} ใบ</span></div>
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-black text-slate-700">พนักงานนำมาคืนจริง</label><input type="number" value={iceData.returnEmptyBags || ''} onChange={e => updateIce('returnEmptyBags', e.target.value)} className="w-1/2 p-2.5 rounded-xl border-2 border-orange-300 text-center font-black text-orange-900 focus:outline-none focus:border-orange-500 shadow-sm" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-black text-slate-700">พนักงานนำมาคืนจริง</label><input type="number" value={iceData.returnEmptyBags === 0 ? '' : iceData.returnEmptyBags} readOnly className="w-1/2 p-2.5 rounded-xl border-2 border-orange-300 text-center font-black text-orange-900 bg-orange-50 cursor-not-allowed outline-none" placeholder="0" /></div>
                       <div className={`p-2 rounded-xl text-center font-bold text-[11px] ${lostEmptyBags > 0 ? 'bg-rose-500/20 text-rose-700 border border-rose-500/30' : lostEmptyBags < 0 ? 'bg-blue-500/20 text-blue-700 border border-blue-500/30' : 'bg-emerald-500/20 text-emerald-700 border border-emerald-500/30'}`}>{lostEmptyBags > 0 ? `🚨 ถุงหาย ${lostEmptyBags} ใบ (บันทึกรอหักเงิน)` : lostEmptyBags < 0 ? `🤔 ถุงเกินมา ${Math.abs(lostEmptyBags)} ใบ` : '✅ ถุงเปล่าคืนครบถ้วน'}</div>
                     </div>
                   </div>
@@ -314,7 +302,7 @@ export default function RouteSettlementPage() {
                         <div className="flex justify-between items-center mb-3"><span className="font-bold text-slate-800">{item.label}</span><span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded shadow-sm border border-slate-100">เบิกรวมวันนี้: <span className="text-blue-600">{item.load}</span></span></div>
                         <div className="flex items-center gap-3">
                           <span className="text-[10px] text-emerald-600 font-bold whitespace-nowrap">นำมาคืน:</span>
-                          <input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} onChange={e => updatePack(item.field as keyof typeof packReturns, e.target.value)} className="w-full p-2 rounded-xl border border-emerald-200 text-center font-bold outline-none focus:border-emerald-500 bg-emerald-50/50 text-emerald-700" placeholder="0" />
+                          <input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} readOnly className="w-full p-2 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" />
                           <div className="flex flex-col items-end bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">
                             <span className="text-[10px] text-blue-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span>
                             <span className="text-[9px] text-blue-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span>
@@ -334,9 +322,22 @@ export default function RouteSettlementPage() {
                     <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-xl border border-slate-700"><span className="text-slate-300 font-bold">ยอดขายรวมสุทธิ</span><span className="font-black text-xl text-white">{totalRevenue.toLocaleString()} บ.</span></div>
                     <div className="space-y-3 pt-2">
                       <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก โอนเข้าบัญชี (บ.)</label><input type="number" value={finance.transfer || ''} onChange={e => updateFinance('transfer', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
-                      <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก จ่ายค้าง (บ.)</label><input type="number" value={finance.payArrears || ''} onChange={e => updateFinance('payArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
+                      {/* 🌟 บันทึกบวกเพิ่มค่าหนี้เก่า */}
+                      <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-emerald-400 font-bold">บวก จ่ายค้างหนี้เก่า (บ.)</label><input type="number" value={finance.payArrears || ''} onChange={e => updateFinance('payArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-emerald-600 focus:border-emerald-400 outline-none text-emerald-400 font-bold text-right" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก ค้างรายวัน (บ.)</label><input type="number" value={finance.dailyArrears || ''} onChange={e => updateFinance('dailyArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
-                      <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก ค้างรายเดือน (บ.)</label><input type="number" value={finance.monthlyArrears || ''} onChange={e => updateFinance('monthlyArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
+                      
+                      {/* 🌟 ป๊อปอัปเลือกลูกหนี้ */}
+                      <div className="flex items-center gap-3">
+                        <label className="w-32 text-[10px] text-rose-400 font-bold">หัก ค้างรายเดือน (บ.)</label>
+                        <div className="flex-1 flex gap-2">
+                          <input type="number" value={finance.monthlyArrears || ''} readOnly className="flex-1 p-2 rounded-xl bg-slate-800/50 border border-slate-700 text-rose-300 font-bold text-right cursor-not-allowed outline-none" placeholder="0" />
+                          <button onClick={openDebtorModal} className="bg-rose-600 hover:bg-rose-500 text-white px-3 rounded-xl font-bold text-[10px] transition-colors whitespace-nowrap">เลือกลูกหนี้</button>
+                        </div>
+                      </div>
+                      {selectedDebtorName && (
+                        <div className="text-right text-[10px] text-rose-400 bg-rose-950/30 p-2 rounded-lg">ลงบัญชีลูกหนี้: <span className="font-bold">{selectedDebtorName}</span> ({finance.monthlyArrears} บ.) <button onClick={cancelDebtor} className="text-slate-400 underline ml-2 hover:text-white">ยกเลิก</button></div>
+                      )}
+
                     </div>
                     <div className="pt-4 mt-2 border-t border-slate-700 text-center"><span className="text-xs text-emerald-400 font-bold block mb-1">ยอดเงินสดที่ต้องนำส่ง:</span><p className="text-4xl font-black text-emerald-400">{expectedCash.toLocaleString()} <span className="text-sm font-normal text-slate-400">บาท</span></p><button onClick={exactCash} className="mt-2 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-300 px-3 py-1 rounded-full transition-colors">คลิกถ้ารับพอดีเป๊ะ</button></div>
                     <div className="bg-white/10 p-4 rounded-2xl border border-white/20 mt-4 backdrop-blur-sm">
@@ -386,8 +387,37 @@ export default function RouteSettlementPage() {
         )}
       </div>
 
+      {/* 🌟 ป๊อปอัป Modal สำหรับเลือกลูกหนี้ */}
+      {isDebtorModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <h3 className="font-black text-lg text-slate-800">📋 เลือกลูกหนี้ (ค้างรายเดือน)</h3>
+              <button onClick={() => setIsDebtorModalOpen(false)} className="text-slate-400 hover:text-rose-500 font-bold bg-white w-8 h-8 rounded-full shadow-sm">✕</button>
+            </div>
+            <div className="p-6 space-y-5 text-sm">
+              <div className="space-y-2">
+                <label className="font-bold text-slate-600">เลือกลูกหนี้จากระบบ:</label>
+                <select value={tempDebtorId} onChange={e => setTempDebtorId(e.target.value)} className="w-full p-3.5 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50">
+                  <option value="">-- กรุณาเลือกลูกหนี้ --</option>
+                  {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ยอดค้างเดิม: {d.total_debt || 0} บ.)</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="font-bold text-slate-600">ระบุยอดเงินที่ขอค้าง (บาท):</label>
+                <input type="number" min="0" value={tempDebtAmount} onChange={e => setTempDebtAmount(e.target.value)} placeholder="0" className="w-full p-4 rounded-xl border-2 border-slate-200 font-black text-2xl text-center focus:border-blue-500 outline-none text-rose-600" />
+              </div>
+              <button onClick={confirmDebtor} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
+                ยืนยันบันทึกยอดค้าง
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {printSlip && (
         <div className="hidden print:block text-black font-sans bg-white p-10 max-w-4xl mx-auto min-h-screen">
+          {/* ข้อมูลพรินต์เหมือนเดิม */}
           <div className="text-center mb-8 pb-6 border-b-4 border-black"><h1 className="text-3xl font-black mb-2">ใบสรุปยอดสายส่งประจำวัน (Route Settlement)</h1><p className="font-bold text-lg">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p></div>
           <div className="grid grid-cols-2 gap-4 mb-8 text-base"><div><p><span className="font-bold">วันที่:</span> {printSlip.date}</p><p><span className="font-bold">สายส่ง:</span> {printSlip.routeName}</p></div><div className="text-right"><p><span className="font-bold">เลขที่เอกสาร:</span> {printSlip.id}</p><p><span className="font-bold">พิมพ์เมื่อ:</span> {new Date().toLocaleString('th-TH')}</p></div></div>
           <table className="w-full border-collapse border-2 border-black text-sm mb-6">
