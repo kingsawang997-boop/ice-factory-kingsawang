@@ -24,11 +24,12 @@ export default function RouteSettlementPage() {
   const [finance, setFinance] = useState({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
 
-  // 🌟 State สำหรับระบบลูกหนี้ (ป๊อปอัป ค้างรายเดือน)
+  // 🌟 State สำหรับระบบป๊อปอัปเลือกลูกหนี้ (เพิ่มรายการสินค้า, ยอดเงิน, และเลขที่เอกสาร)
   const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
   const [debtorsList, setDebtorsList] = useState<any[]>([])
   const [tempDebtorId, setTempDebtorId] = useState('')
-  const [tempDebtAmount, setTempDebtAmount] = useState('')
+  const [debtorItems, setDebtorItems] = useState<any[]>([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
+  const [debtorDocNo, setDebtorDocNo] = useState('')
   const [selectedDebtorId, setSelectedDebtorId] = useState('')
   const [selectedDebtorName, setSelectedDebtorName] = useState('')
 
@@ -109,26 +110,45 @@ export default function RouteSettlementPage() {
     setIsPullingData(false)
   }
 
-  // 🌟 ฟังก์ชันจัดการป๊อปอัปเลือกลูกหนี้
+  // จัดการป๊อปอัปเลือกลูกหนี้
   const openDebtorModal = async () => {
     const { data } = await supabase.from('debtors').select('*').order('name')
     if (data) setDebtorsList(data)
     setIsDebtorModalOpen(true)
   }
 
+  const addDebtorItemRow = () => {
+    setDebtorItems([...debtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
+  }
+
+  const updateDebtorItem = (index: number, field: string, value: any) => {
+    const newItems = [...debtorItems]
+    newItems[index][field] = value
+    setDebtorItems(newItems)
+  }
+
+  const removeDebtorItemRow = (index: number) => {
+    setDebtorItems(debtorItems.filter((_, idx) => idx !== index))
+  }
+
+  const totalDebtorCalculatedAmount = debtorItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.price || 0)), 0)
+
   const confirmDebtor = () => {
-    if (!tempDebtorId || !tempDebtAmount) return alert('กรุณาเลือกลูกหนี้และระบุยอดเงินให้ครบถ้วน')
+    if (!tempDebtorId) return alert('กรุณาเลือกลูกหนี้ในระบบ')
+    if (!debtorDocNo) return alert('กรุณากรอกเลขที่เอกสารอ้างอิง')
+    if (totalDebtorCalculatedAmount <= 0) return alert('กรุณาเพิ่มรายการสินค้าและยอดเงินให้ถูกต้อง')
+
     const debtorInfo = debtorsList.find(d => d.id === tempDebtorId)
     if(debtorInfo) {
       setSelectedDebtorId(debtorInfo.id)
       setSelectedDebtorName(debtorInfo.name)
-      setFinance(prev => ({ ...prev, monthlyArrears: Number(tempDebtAmount) }))
+      setFinance(prev => ({ ...prev, monthlyArrears: totalDebtorCalculatedAmount }))
       setIsDebtorModalOpen(false)
     }
   }
 
   const cancelDebtor = () => {
-    setSelectedDebtorId(''); setSelectedDebtorName(''); setTempDebtorId(''); setTempDebtAmount('')
+    setSelectedDebtorId(''); setSelectedDebtorName(''); setTempDebtorId(''); setDebtorDocNo('')
     setFinance(prev => ({ ...prev, monthlyArrears: 0 }))
   }
 
@@ -148,8 +168,6 @@ export default function RouteSettlementPage() {
   const totalPackRevenue = (icePackSold * adminSettings.icePackPrice) + (waterSold1500 * adminSettings.waterPrice1500) + (waterSold600 * adminSettings.waterPrice600) + (waterSold350 * adminSettings.waterPrice350)
 
   const totalRevenue = iceRevenue + totalPackRevenue
-  
-  // 🌟 แก้ไขสูตรคำนวณเงิน: บวกจ่ายค้าง(หนี้เก่า) และหักรายการอื่นออก
   const expectedCash = Math.max(0, totalRevenue + finance.payArrears - finance.transfer - finance.dailyArrears - finance.monthlyArrears)
   const cashDifference = finance.actualCash - expectedCash
 
@@ -160,19 +178,20 @@ export default function RouteSettlementPage() {
 
   const handleSave = async () => {
     if (bagDifference !== 0) {
-      const confirmSave = window.confirm(`⚠️ ยอดน้ำแข็งเต็มไม่ตรงกับตอนเบิก (คลาดเคลื่อน ${bagDifference} กระสอบ)\nคุณต้องการบันทึกข้อมูลเพื่อตรวจสอบภายหลังใช่หรือไม่?`)
+      const confirmSave = window.confirm(`⚠️ ยอดน้ำแข็งเต็มไม่ตรงกับตอนเบิก (คลาดเคลื่อน ${bagDifference} กระสอบ)\nคุณต้องการบันทึกข้อมูลเพื่อตรวจสอบใช่หรือไม่?`)
       if (!confirmSave) return
     }
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
     
-    // 🌟 ระบบบันทึกหนี้สินเข้าไปในฐานข้อมูลลูกหนี้
+    // บันทึกหนี้ลงระบบลูกหนี้พร้อมเลขที่เอกสาร
     if (finance.monthlyArrears > 0 && selectedDebtorId) {
       const { data: debtorData } = await supabase.from('debtors').select('total_debt').eq('id', selectedDebtorId).single()
       if (debtorData) {
+        const itemDesc = debtorItems.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
         await supabase.from('debtor_transactions').insert([{
           id: `TRX-${Date.now()}`, debtor_id: selectedDebtorId, date: reportDate, type: 'borrow',
-          amount: finance.monthlyArrears, note: `ค้างค่าน้ำแข็ง สายส่ง: ${selectedTruck} (บิล ${docNo})`, by: cashierName
+          amount: finance.monthlyArrears, note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, by: cashierName
         }])
         await supabase.from('debtors').update({ total_debt: Number(debtorData.total_debt || 0) + Number(finance.monthlyArrears) }).eq('id', selectedDebtorId)
       }
@@ -194,14 +213,12 @@ export default function RouteSettlementPage() {
     
     if (error) alert('เกิดข้อผิดพลาดในการบันทึก: ' + error.message)
     else {
-      alert(`✅ ปิดยอดสำเร็จ!\nเลขที่บิล: ${docNo}\nเงินสดรับเข้า: ${finance.actualCash.toLocaleString()} บาท\nถุงหาย(รอหักเงิน): ${lostEmptyBags > 0 ? lostEmptyBags : 0} ใบ`)
+      alert(`✅ ปิดยอดสำเร็จ!\nเลขที่บิล: ${docNo}\nเงินสดรับเข้า: ${finance.actualCash.toLocaleString()} บาท`)
       window.location.reload()
     }
   }
 
-  // ==========================================
-  // TAB 2: ประวัติย้อนหลัง & การพิมพ์
-  // ==========================================
+  // TAB 2: ประวัติ
   const [historyDate, setHistoryDate] = useState(getTodayString())
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
@@ -264,7 +281,8 @@ export default function RouteSettlementPage() {
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10"></div>}
                   <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-end mb-2"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-blue-500">🧊</span> กระทบยอดกระสอบ</h2><span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider border ${bagDifference === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse'}`}>{bagDifference === 0 ? '✓ กระสอบครบ' : bagDifference > 0 ? `⚠️ หาย ${bagDifference} ใบ` : `❓ เกิน ${Math.abs(bagDifference)} ใบ`}</span></div>
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">กระสอบส่งคืนคลัง (ใบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} readOnly className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" /></div>
+                    {/* 🌟 เปลี่ยนข้อความตามข้อ 1 */}
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">น้ำแข็งส่งคืนคลัง (กระสอบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} readOnly className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" /></div>
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} readOnly className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none cursor-not-allowed" placeholder="0" /></div>
                     <div className="pt-3 space-y-3 border-t border-slate-100">
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
@@ -322,11 +340,9 @@ export default function RouteSettlementPage() {
                     <div className="flex justify-between items-center bg-slate-800/50 p-3 rounded-xl border border-slate-700"><span className="text-slate-300 font-bold">ยอดขายรวมสุทธิ</span><span className="font-black text-xl text-white">{totalRevenue.toLocaleString()} บ.</span></div>
                     <div className="space-y-3 pt-2">
                       <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก โอนเข้าบัญชี (บ.)</label><input type="number" value={finance.transfer || ''} onChange={e => updateFinance('transfer', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
-                      {/* 🌟 บันทึกบวกเพิ่มค่าหนี้เก่า */}
                       <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-emerald-400 font-bold">บวก จ่ายค้างหนี้เก่า (บ.)</label><input type="number" value={finance.payArrears || ''} onChange={e => updateFinance('payArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-emerald-600 focus:border-emerald-400 outline-none text-emerald-400 font-bold text-right" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-32 text-[10px] text-slate-400 font-bold">หัก ค้างรายวัน (บ.)</label><input type="number" value={finance.dailyArrears || ''} onChange={e => updateFinance('dailyArrears', e.target.value)} className="flex-1 p-2 rounded-xl bg-slate-800 border border-slate-600 focus:border-blue-500 outline-none text-white font-bold text-right" placeholder="0" /></div>
                       
-                      {/* 🌟 ป๊อปอัปเลือกลูกหนี้ */}
                       <div className="flex items-center gap-3">
                         <label className="w-32 text-[10px] text-rose-400 font-bold">หัก ค้างรายเดือน (บ.)</label>
                         <div className="flex-1 flex gap-2">
@@ -335,7 +351,7 @@ export default function RouteSettlementPage() {
                         </div>
                       </div>
                       {selectedDebtorName && (
-                        <div className="text-right text-[10px] text-rose-400 bg-rose-950/30 p-2 rounded-lg">ลงบัญชีลูกหนี้: <span className="font-bold">{selectedDebtorName}</span> ({finance.monthlyArrears} บ.) <button onClick={cancelDebtor} className="text-slate-400 underline ml-2 hover:text-white">ยกเลิก</button></div>
+                        <div className="text-right text-[10px] text-rose-400 bg-rose-950/30 p-2 rounded-lg">ลูกหนี้: <span className="font-bold">{selectedDebtorName}</span> ({finance.monthlyArrears} บ.) <button onClick={cancelDebtor} className="text-slate-400 underline ml-2 hover:text-white">ยกเลิก</button></div>
                       )}
 
                     </div>
@@ -352,7 +368,6 @@ export default function RouteSettlementPage() {
           </>
         )}
 
-        {/* TAB 2: ประวัติ */}
         {activeTab === 'history' && (
           <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 border-b border-slate-100 pb-4 gap-4">
@@ -387,28 +402,64 @@ export default function RouteSettlementPage() {
         )}
       </div>
 
-      {/* 🌟 ป๊อปอัป Modal สำหรับเลือกลูกหนี้ */}
+      {/* 🌟 ป๊อปอัป Modal เลือกลูกหนี้แบบสมบูรณ์ตามข้อ 2 */}
       {isDebtorModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="font-black text-lg text-slate-800">📋 เลือกลูกหนี้ (ค้างรายเดือน)</h3>
+              <h3 className="font-black text-lg text-slate-800">📋 บันทึกค้างรายเดือน (เลือกลูกหนี้)</h3>
               <button onClick={() => setIsDebtorModalOpen(false)} className="text-slate-400 hover:text-rose-500 font-bold bg-white w-8 h-8 rounded-full shadow-sm">✕</button>
             </div>
-            <div className="p-6 space-y-5 text-sm">
-              <div className="space-y-2">
-                <label className="font-bold text-slate-600">เลือกลูกหนี้จากระบบ:</label>
-                <select value={tempDebtorId} onChange={e => setTempDebtorId(e.target.value)} className="w-full p-3.5 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50">
-                  <option value="">-- กรุณาเลือกลูกหนี้ --</option>
-                  {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ยอดค้างเดิม: {d.total_debt || 0} บ.)</option>)}
-                </select>
+            <div className="p-6 space-y-5 text-sm max-h-[75vh] overflow-y-auto">
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-600 text-xs">เลือกลูกหนี้:</label>
+                  <select value={tempDebtorId} onChange={e => setTempDebtorId(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50 text-xs">
+                    <option value="">-- กรุณาเลือกลูกหนี้ --</option>
+                    {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ค้างเดิม: {d.total_debt || 0} บ.)</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-600 text-xs">เลขที่เอกสารอ้างอิง:</label>
+                  <input type="text" value={debtorDocNo} onChange={e => setDebtorDocNo(e.target.value)} placeholder="เช่น INV-001 หรือเลขที่บิล" className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-slate-800 focus:border-blue-500 outline-none text-xs bg-slate-50" />
+                </div>
               </div>
-              <div className="space-y-2">
-                <label className="font-bold text-slate-600">ระบุยอดเงินที่ขอค้าง (บาท):</label>
-                <input type="number" min="0" value={tempDebtAmount} onChange={e => setTempDebtAmount(e.target.value)} placeholder="0" className="w-full p-4 rounded-xl border-2 border-slate-200 font-black text-2xl text-center focus:border-blue-500 outline-none text-rose-600" />
+
+              {/* ตารางรายการสินค้า */}
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between items-center">
+                  <label className="font-black text-slate-700 text-xs">1. รายการสินค้า & 2. ยอดเงินสินค้า:</label>
+                  <button onClick={addDebtorItemRow} className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 font-bold text-xs px-3 py-1.5 rounded-lg border border-emerald-200">+ เพิ่มรายการ</button>
+                </div>
+                <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 text-[11px] text-slate-600">
+                      <tr><th className="p-3 font-bold">ชื่อสินค้า</th><th className="p-3 font-bold text-center w-24">จำนวน</th><th className="p-3 font-bold text-right w-28">ราคา/หน่วย</th><th className="p-3 font-bold text-right w-28">รวม (บาท)</th><th className="p-3 w-12"></th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs">
+                      {debtorItems.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2"><input type="text" value={item.productName} onChange={e => updateDebtorItem(idx, 'productName', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-bold" /></td>
+                          <td className="p-2"><input type="number" min="1" value={item.qty} onChange={e => updateDebtorItem(idx, 'qty', Number(e.target.value))} className="w-full p-2 border border-slate-200 rounded-lg text-center font-bold" /></td>
+                          <td className="p-2"><input type="number" min="0" value={item.price} onChange={e => updateDebtorItem(idx, 'price', Number(e.target.value))} className="w-full p-2 border border-slate-200 rounded-lg text-right font-bold" /></td>
+                          <td className="p-2 text-right font-black text-slate-800">{(item.qty * item.price).toLocaleString()}</td>
+                          <td className="p-2 text-center"><button onClick={() => removeDebtorItemRow(idx)} className="text-rose-500 font-bold hover:bg-rose-50 p-1.5 rounded">✕</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <button onClick={confirmDebtor} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
-                ยืนยันบันทึกยอดค้าง
+
+              {/* ยอดรวมสุทธิ */}
+              <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex justify-between items-center">
+                <span className="font-bold text-blue-900 text-sm">3. ยอดรวมสุทธิทั้งหมด:</span>
+                <span className="font-black text-3xl text-blue-700">{totalDebtorCalculatedAmount.toLocaleString()} <span className="text-sm font-bold">บาท</span></span>
+              </div>
+
+              <button onClick={confirmDebtor} className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
+                ยืนยันบันทึกยอดหนี้ค้างรายเดือน
               </button>
             </div>
           </div>
@@ -417,7 +468,6 @@ export default function RouteSettlementPage() {
 
       {printSlip && (
         <div className="hidden print:block text-black font-sans bg-white p-10 max-w-4xl mx-auto min-h-screen">
-          {/* ข้อมูลพรินต์เหมือนเดิม */}
           <div className="text-center mb-8 pb-6 border-b-4 border-black"><h1 className="text-3xl font-black mb-2">ใบสรุปยอดสายส่งประจำวัน (Route Settlement)</h1><p className="font-bold text-lg">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p></div>
           <div className="grid grid-cols-2 gap-4 mb-8 text-base"><div><p><span className="font-bold">วันที่:</span> {printSlip.date}</p><p><span className="font-bold">สายส่ง:</span> {printSlip.routeName}</p></div><div className="text-right"><p><span className="font-bold">เลขที่เอกสาร:</span> {printSlip.id}</p><p><span className="font-bold">พิมพ์เมื่อ:</span> {new Date().toLocaleString('th-TH')}</p></div></div>
           <table className="w-full border-collapse border-2 border-black text-sm mb-6">
