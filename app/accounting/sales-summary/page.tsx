@@ -43,11 +43,12 @@ export default function RouteSettlementPage() {
 
   useEffect(() => {
     if (selectedTruck) {
-      fetchTruckLoadingData()
-      // รีเซ็ตยอดเมื่อเปลี่ยนคัน
+      // เคลียร์ค่าให้เป็น 0 ก่อนดึงข้อมูลใหม่
       setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
       setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
       setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
+      
+      fetchTruckLoadingData()
     }
   }, [selectedTruck, reportDate])
 
@@ -65,12 +66,11 @@ export default function RouteSettlementPage() {
     }
   }
 
-  // 🌟 ฟังก์ชันดึงรถจากระบบจัดการ
   const fetchTruckRoutes = async () => {
     const { data } = await supabase.from('truck_routes').select('*').eq('isActive', true).order('id')
     if (data) {
       setTruckRoutes(data)
-      if(data.length > 0) {
+      if(data.length > 0 && !selectedTruck) {
         setSelectedTruck(`${data[0].route_name} (คนขับ: ${data[0].driver_name})`)
       }
     }
@@ -79,7 +79,7 @@ export default function RouteSettlementPage() {
   const fetchTruckLoadingData = async () => {
     setIsPullingData(true)
     
-    // 🌟 เปลี่ยนไปดึงสถานะ 'completed' ที่ฝ่ายคลังเช็คของคืนเรียบร้อยแล้ว
+    // ดึงบิลที่ฝ่ายคลังเช็คของคืนแล้ว (completed)
     const { data } = await supabase
       .from('route_settlements')
       .select('details')
@@ -92,15 +92,15 @@ export default function RouteSettlementPage() {
 
     if (data && data.length > 0) {
       data.forEach(record => {
-        const itemsList = record.details?.loadedItems || record.details?.items || []
+        const itemsList = record.details?.items || record.details?.loadedItems || []
         itemsList.forEach((item: any) => {
           const qty = Number(item.loadedQty || item.qty || 0)
           const returned = Number(item.returnedQty || 0)
           const damaged = Number(item.damagedQty || 0)
           const name = item.name || ''
           
-          // ดึงยอดที่รับคืนและเสียหายมาด้วย
-          if (name.includes('แพ็ค')) { packs += qty; retPacks += (returned + damaged) }
+          // ดึงยอดรับคืนและของเสียมาเก็บไว้
+          if (name.includes('แพ็ค') && name.includes('น้ำแข็ง')) { packs += qty; retPacks += (returned + damaged) }
           else if (name.includes('1500')) { w1500 += qty; ret1500 += (returned + damaged) }
           else if (name.includes('600')) { w600 += qty; ret600 += (returned + damaged) }
           else if (name.includes('350')) { w350 += qty; ret350 += (returned + damaged) }
@@ -113,17 +113,28 @@ export default function RouteSettlementPage() {
       })
     }
     
+    // บันทึกยอดตั้งต้น (Gross Load)
     setMorningLoad({ totalIceBags: iceBags, icePacks: packs, water1500: w1500, water600: w600, water350: w350 })
     
-    // 🌟 กรอกยอดของคืนเข้าฟอร์มให้อัตโนมัติ (บัญชีไม่ต้องพิมพ์ใหม่)
+    // 🌟 กรอกยอดของคืนและของเสียให้อัตโนมัติ (ดึงมาจากหน้าคลัง)
     setIceData(prev => ({ ...prev, returned: retIce, melted: dmgIce }))
     setPackReturns({ icePacks: retPacks, water1500: ret1500, water600: ret600, water350: ret350 })
 
     setIsPullingData(false)
   }
 
-  const accountedIceBags = iceData.returned + iceData.melted + iceData.service + iceData.sold45 + iceData.sold40 + iceData.sold35
-  const bagDifference = morningLoad.totalIceBags - accountedIceBags
+  // =====================================
+  // 🧮 LOGIC การคำนวณ (ปรับใหม่ตามยอดสุทธิ)
+  // =====================================
+  // 1. ยอดเบิกกระสอบสุทธิ (หลังหักคืนคลัง) - ใช้สำหรับแสดงผลและคำนวณส่วนต่าง
+  const netIceBags = Math.max(0, morningLoad.totalIceBags - iceData.returned)
+
+  // 2. ยอดที่ขายและใช้งานไป (ไม่รวมยอดคืนคลัง เพราะหักไปแล้วใน netIceBags)
+  const accountedIceBags = iceData.melted + iceData.service + iceData.sold45 + iceData.sold40 + iceData.sold35
+  
+  // 3. ส่วนต่างกระสอบ (ควรเป็น 0)
+  const bagDifference = netIceBags - accountedIceBags
+
   const iceRevenue = (iceData.sold45 * adminSettings.icePrice1) + (iceData.sold40 * adminSettings.icePrice2) + (iceData.sold35 * adminSettings.icePrice3)
 
   const totalSoldAndServiceBags = iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.service
@@ -158,7 +169,18 @@ export default function RouteSettlementPage() {
     const monthlyReportData = {
       date: reportDate, truck: selectedTruck,
       revenue: { iceSales: iceRevenue, packSales: totalPackRevenue, total: totalRevenue },
-      bagTracking: { soldAndService: totalSoldAndServiceBags, customerOwe: iceData.customerOweBags, customerReturnOld: iceData.customerReturnOldBags, expectedReturn: expectedEmptyBags, actualReturn: iceData.returnEmptyBags, lostBagsToDeduct: lostEmptyBags },
+      bagTracking: { 
+        grossLoad: morningLoad.totalIceBags,
+        netLoad: netIceBags,
+        returnedToStock: iceData.returned,
+        melted: iceData.melted,
+        soldAndService: totalSoldAndServiceBags, 
+        customerOwe: iceData.customerOweBags, 
+        customerReturnOld: iceData.customerReturnOldBags, 
+        expectedReturn: expectedEmptyBags, 
+        actualReturn: iceData.returnEmptyBags, 
+        lostBagsToDeduct: lostEmptyBags 
+      },
       cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference }
     }
 
@@ -168,7 +190,6 @@ export default function RouteSettlementPage() {
       status: 'received' 
     }
 
-    // 🌟 อัปเดตสถานะบิลของคลังจาก completed -> cleared_by_summary
     await supabase.from('route_settlements').update({ status: 'cleared_by_summary' }).eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
 
     const { error } = await supabase.from('route_settlements').insert([newSettlement])
@@ -241,25 +262,26 @@ export default function RouteSettlementPage() {
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex items-center justify-center font-bold text-blue-600">⏳ กำลังดึงข้อมูลจากหน้าลาน...</div>}
                   <label className="text-sm font-bold text-slate-700 block">เลือกรถที่กลับเข้าโรงงาน</label>
                   <select value={selectedTruck} onChange={e => setSelectedTruck(e.target.value)} className="w-full px-5 py-3 rounded-xl border border-slate-200 bg-slate-50 font-black text-blue-600 focus:outline-none">
-                    {/* 🌟 ดึงข้อมูลที่ผูกไว้มาแสดง */}
                     {truckRoutes.map(r => {
                       const routeNameFull = `${r.route_name} (คนขับ: ${r.driver_name})`
                       return <option key={r.id} value={routeNameFull}>{r.route_name} - คนขับ: {r.driver_name}</option>
                     })}
                   </select>
-                  <div className="bg-sky-50 px-4 py-3 rounded-xl border border-sky-100 flex justify-between items-center"><span className="font-bold text-sky-800">ยอดเบิกกระสอบรวม:</span><span className="text-2xl font-black text-blue-600">{morningLoad.totalIceBags} <span className="text-sm">ใบ</span></span></div>
+                  {/* 🌟 แสดงยอดหลังหักคืนคลัง */}
+                  <div className="bg-sky-50 px-4 py-3 rounded-xl border border-sky-100 flex justify-between items-center"><span className="font-bold text-sky-800">ยอดเบิกสุทธิ <span className="text-[10px] text-sky-600 font-normal">(หลังหักคืนคลัง)</span>:</span><span className="text-2xl font-black text-blue-600">{netIceBags} <span className="text-sm">ใบ</span></span></div>
                 </div>
 
                 <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-4 flex flex-col h-full relative">
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10"></div>}
                   <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-end mb-2"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-blue-500">🧊</span> กระทบยอดกระสอบ</h2><span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider border ${bagDifference === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse'}`}>{bagDifference === 0 ? '✓ กระสอบครบ' : bagDifference > 0 ? `⚠️ หาย ${bagDifference} ใบ` : `❓ เกิน ${Math.abs(bagDifference)} ใบ`}</span></div>
                   <div className="space-y-3">
-                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-slate-600">กระสอบส่งคืนคลัง</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} onChange={e => updateIce('returned', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-slate-200 text-center font-bold focus:border-blue-500 outline-none bg-slate-50" placeholder="0" /></div>
+                    {/* 🌟 ช่องคืนคลังไฮไลท์สีเขียวให้รู้ว่าดึงมาอัตโนมัติ */}
+                    <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">กระสอบส่งคืนคลัง (ใบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} onChange={e => updateIce('returned', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold focus:border-emerald-500 outline-none bg-emerald-50/50 text-emerald-700" placeholder="0" /></div>
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} onChange={e => updateIce('melted', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none" placeholder="0" /></div>
-                    <div className="pt-3 space-y-3">
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold text-emerald-700 focus:border-emerald-500 outline-none" placeholder="0" /></div>
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-600">ขายได้ (ราคา {adminSettings.icePrice2}.-)</label><input type="number" value={iceData.sold40 || ''} onChange={e => updateIce('sold40', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold text-emerald-700 focus:border-emerald-500 outline-none" placeholder="0" /></div>
-                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-600">ขายได้ (ราคา {adminSettings.icePrice3}.-)</label><input type="number" value={iceData.sold35 || ''} onChange={e => updateIce('sold35', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold text-emerald-700 focus:border-emerald-500 outline-none" placeholder="0" /></div>
+                    <div className="pt-3 space-y-3 border-t border-slate-100">
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice2}.-)</label><input type="number" value={iceData.sold40 || ''} onChange={e => updateIce('sold40', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice3}.-)</label><input type="number" value={iceData.sold35 || ''} onChange={e => updateIce('sold35', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                     </div>
                     <div className="flex items-center gap-3 pt-3"><label className="w-1/2 font-bold text-slate-600">บริการ (ถุง)</label><input type="number" value={iceData.service || ''} onChange={e => updateIce('service', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-slate-200 text-center font-bold focus:border-blue-500 outline-none" placeholder="0" /></div>
                   </div>
@@ -290,7 +312,14 @@ export default function RouteSettlementPage() {
                     ].map((item, idx) => (
                       <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                         <div className="flex justify-between items-center mb-3"><span className="font-bold text-slate-800">{item.label}</span><span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded shadow-sm border border-slate-100">เบิกรวมวันนี้: <span className="text-blue-600">{item.load}</span></span></div>
-                        <div className="flex items-center gap-3"><span className="text-[10px] text-slate-500 whitespace-nowrap">นำมาคืน:</span><input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} onChange={e => updatePack(item.field as keyof typeof packReturns, e.target.value)} className="w-full p-2 rounded-xl border border-slate-200 text-center font-bold outline-none focus:border-blue-500 bg-white" placeholder="0" /><div className="flex flex-col items-end bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100"><span className="text-[10px] text-emerald-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span><span className="text-[9px] text-emerald-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span></div></div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] text-emerald-600 font-bold whitespace-nowrap">นำมาคืน:</span>
+                          <input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} onChange={e => updatePack(item.field as keyof typeof packReturns, e.target.value)} className="w-full p-2 rounded-xl border border-emerald-200 text-center font-bold outline-none focus:border-emerald-500 bg-emerald-50/50 text-emerald-700" placeholder="0" />
+                          <div className="flex flex-col items-end bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">
+                            <span className="text-[10px] text-blue-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span>
+                            <span className="text-[9px] text-blue-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
