@@ -66,10 +66,21 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🌟 รหัสลับเตะลิ้นชัก (Xprinter 12V/24V)
-  const DRAWER_KICK_CODE = "\x1B\x70\x00\x3C\xFF";
+  // 🚀 ฟังก์ชันแปลงภาษาเครื่อง (เตะลิ้นชัก + ภาษาไทย) เพื่อส่งให้ RawBT แบบ Base64
+  const getRawBTUrl = (text: string) => {
+    const kickDrawerBytes = [27, 112, 0, 60, 255]; // ESC p 0 60 255 (รหัสเตะลิ้นชักสากล)
+    const textBytes = new TextEncoder().encode(text); // แปลงภาษาไทยให้ไม่เพี้ยน
+    const combined = new Uint8Array(kickDrawerBytes.length + textBytes.length);
+    combined.set(kickDrawerBytes, 0);
+    combined.set(textBytes, kickDrawerBytes.length);
+    
+    let binaryString = '';
+    for (let i = 0; i < combined.byteLength; i++) {
+      binaryString += String.fromCharCode(combined[i]);
+    }
+    return `rawbt:base64,${btoa(binaryString)}`;
+  }
 
-  // 🚀 อัปเกรด: ชำระเงิน + สั่งพิมพ์ตรงเข้า RawBT อัตโนมัติ!
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -102,8 +113,7 @@ export default function POSPage() {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
-      // 🌟 เอาโค้ดเตะลิ้นชักแปะไว้บรรทัดแรกสุดของใบเสร็จเลย
-      const textToPrint = DRAWER_KICK_CODE + `
+      const textToPrint = `
 คิงส์สว่าง โรงงานน้ำแข็ง
 ใบเสร็จรับเงินอย่างย่อ
 --------------------------------
@@ -121,16 +131,10 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 \n\n\n`;
 
       if (isMobileDevice() && printFormat === '58mm') {
-        // 🚀 ยิง Android Deep Link ระบุเจาะจงไปที่แอป RawBT เลย (ไม่ต้องกด Share)
-        const encodedText = encodeURIComponent(textToPrint);
-        const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodedText};package=ru.a402d.rawbtprinter;end`;
-        
-        window.location.href = intentUrl;
-        
-        // ล้างตะกร้าหลังส่งคำสั่งไป 1 วินาที
+        // 🌟 ยิง URL Scheme ระดับสูงเข้า RawBT (สั่งเตะลิ้นชัก + พิมพ์ทันที ไม่เด้งแชร์)
+        window.location.href = getRawBTUrl(textToPrint);
         setTimeout(() => { clearCart(); fetchActiveProducts(); }, 1000);
       } else {
-        // 💻 สำหรับ PC Desktop
         const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
         setPrintReceipt(receiptData)
         setTimeout(() => { window.print(); setTimeout(() => { setPrintReceipt(null); clearCart(); fetchActiveProducts() }, 1000) }, 1000)
@@ -138,7 +142,6 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     }
   }
 
-  // 🌟 เตะลิ้นชักด้วยมือ (ยิงตรงเข้า RawBT)
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
@@ -154,9 +157,8 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsVerifyingPin(false); setIsPinModalOpen(false); setPinInput('')
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const textToPrint = DRAWER_KICK_CODE + `\nเปิดลิ้นชักโดย: ${employeeData.name}\n\n`;
-      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textToPrint)};package=ru.a402d.rawbtprinter;end`;
-      window.location.href = intentUrl;
+      const textToPrint = `\nเปิดลิ้นชักโดย: ${employeeData.name}\n\n`;
+      window.location.href = getRawBTUrl(textToPrint);
     } else {
       setPrintReceipt({ isManualKick: true })
       setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
@@ -172,7 +174,6 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setPosCashToday(cCash); setPosTransferToday(cTransfer)
   }
 
-  // 🌟 ปิดกะส่งยอด (ยิงตรงเข้า RawBT)
   const submitCloseShift = async () => {
     if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้')
     const diff = Number(actualPosCash) - posCashToday
@@ -185,7 +186,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsClosingShift(false)
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const textCloseShift = DRAWER_KICK_CODE + `
+      const textCloseShift = `
 ใบนับเงินปิดกะ
 คิงส์สว่าง (หน้าร้าน POS)
 --------------------------------
@@ -202,8 +203,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 ลงชื่อแคชเชียร์ ......................
 \n\n`;
 
-      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textCloseShift)};package=ru.a402d.rawbtprinter;end`;
-      window.location.href = intentUrl;
+      window.location.href = getRawBTUrl(textCloseShift);
 
       setTimeout(() => {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
