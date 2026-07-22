@@ -66,19 +66,26 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันแปลงภาษาเครื่อง (เตะลิ้นชัก + ภาษาไทย) เพื่อส่งให้ RawBT แบบ Base64
+  // 🚀 ฟังก์ชันแปลงภาษาเครื่อง (เตะลิ้นชัก + ภาษาไทย)
   const getRawBTUrl = (text: string) => {
-    const kickDrawerBytes = [27, 112, 0, 60, 255]; // ESC p 0 60 255 (รหัสเตะลิ้นชักสากล)
-    const textBytes = new TextEncoder().encode(text); // แปลงภาษาไทยให้ไม่เพี้ยน
-    const combined = new Uint8Array(kickDrawerBytes.length + textBytes.length);
-    combined.set(kickDrawerBytes, 0);
-    combined.set(textBytes, kickDrawerBytes.length);
+    // 1. ปรับรหัสเตะลิ้นชักใหม่ ให้ปลอดภัย 100% กับการแปลงภาษา
+    // ใช้ \x30 (เลข 0) แทน \x00 เพื่อป้องกันข้อความขาดหาย 
+    // และใช้ \x78 แทน \xFF เพื่อให้รองรับรหัส UTF-8 (ภาษาไทย) ได้อย่างสมบูรณ์
+    const kickCode = "\x1B\x70\x30\x3C\x78"; 
     
+    // เอาโค้ดเตะลิ้นชัก แปะไว้บนสุดของใบเสร็จ
+    const fullText = kickCode + text;
+    
+    // 2. แปลงข้อความทั้งหมดเป็นรูปแบบ UTF-8 (รักษาภาษาไทยไว้ไม่ให้เพี้ยน)
+    const utf8Bytes = new TextEncoder().encode(fullText);
     let binaryString = '';
-    for (let i = 0; i < combined.byteLength; i++) {
-      binaryString += String.fromCharCode(combined[i]);
+    for (let i = 0; i < utf8Bytes.byteLength; i++) {
+      binaryString += String.fromCharCode(utf8Bytes[i]);
     }
-    return `rawbt:base64,${btoa(binaryString)}`;
+    
+    // 3. 🌟 ทีเด็ดอยู่ตรงนี้: ส่งเป็น data:text/plain;charset=utf-8 
+    // เพื่อบังคับให้แอป RawBT จัดการฟอนต์ภาษาไทยให้อัตโนมัติ ก่อนสั่งปริ้น
+    return `rawbt:data:text/plain;charset=utf-8;base64,${btoa(binaryString)}`;
   }
 
   const handleCheckout = async () => {
