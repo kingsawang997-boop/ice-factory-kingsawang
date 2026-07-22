@@ -66,26 +66,10 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันลับ: ยิงคำสั่งตรงเข้า Localhost ของ RawBT (ไม่ง้อเมนู Share)
-  const printSilentToRawBT = async (text: string) => {
-    try {
-      // 1B 70 00 3C FF คือรหัสเตะลิ้นชัก Xprinter 
-      const kickCode = "\x1B\x70\x00\x3C\xFF"; 
-      const fullText = kickCode + text;
-      
-      const response = await fetch('http://127.0.0.1:40213/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: fullText
-      });
-      return response.ok;
-    } catch (err) {
-      console.error("RawBT Silent Print Failed", err);
-      return false;
-    }
-  }
+  // 🌟 รหัสลับเตะลิ้นชัก (Xprinter 12V/24V)
+  const DRAWER_KICK_CODE = "\x1B\x70\x00\x3C\xFF";
 
-  // 🚀 อัปเกรด: ชำระเงิน + สั่งพิมพ์ออโต้ทันที!
+  // 🚀 อัปเกรด: ชำระเงิน + สั่งพิมพ์ตรงเข้า RawBT อัตโนมัติ!
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -104,8 +88,7 @@ export default function POSPage() {
       .filter(item => !String(item.id).startsWith('CUSTOM-'))
       .map(item => {
         const currentProduct = products.find(p => p.id === item.id)
-        const currentStock = Number(currentProduct?.stock || 0)
-        return supabase.from('products').update({ stock: currentStock - item.qty }).eq('id', item.id)
+        return supabase.from('products').update({ stock: Number(currentProduct?.stock || 0) - item.qty }).eq('id', item.id)
       })
     await Promise.all(stockUpdatePromises)
 
@@ -119,7 +102,8 @@ export default function POSPage() {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
-      const textToPrint = `
+      // 🌟 เอาโค้ดเตะลิ้นชักแปะไว้บรรทัดแรกสุดของใบเสร็จเลย
+      const textToPrint = DRAWER_KICK_CODE + `
 คิงส์สว่าง โรงงานน้ำแข็ง
 ใบเสร็จรับเงินอย่างย่อ
 --------------------------------
@@ -137,18 +121,14 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 \n\n\n`;
 
       if (isMobileDevice() && printFormat === '58mm') {
-        // 🌟 ยิงคำสั่งปริ้นแบบเงียบๆ (Silent Print)
-        const isSuccess = await printSilentToRawBT(textToPrint);
+        // 🚀 ยิง Android Deep Link ระบุเจาะจงไปที่แอป RawBT เลย (ไม่ต้องกด Share)
+        const encodedText = encodeURIComponent(textToPrint);
+        const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodedText};package=ru.a402d.rawbtprinter;end`;
         
-        if (isSuccess) {
-          // ถ้าสำเร็จ ล้างตะกร้าทันทีโดยไม่มีหน้าต่างอะไรเด้ง
-          clearCart(); fetchActiveProducts();
-        } else {
-          // ถ้าแอป RawBT ปิดอยู่ ให้เด้งเมนู Share เป็นแผนสำรอง
-          navigator.share({ text: textToPrint })
-            .then(() => { clearCart(); fetchActiveProducts(); })
-            .catch(() => { clearCart(); fetchActiveProducts(); });
-        }
+        window.location.href = intentUrl;
+        
+        // ล้างตะกร้าหลังส่งคำสั่งไป 1 วินาที
+        setTimeout(() => { clearCart(); fetchActiveProducts(); }, 1000);
       } else {
         // 💻 สำหรับ PC Desktop
         const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
@@ -158,7 +138,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     }
   }
 
-  // 🌟 เตะลิ้นชักด้วยมือแบบออโต้
+  // 🌟 เตะลิ้นชักด้วยมือ (ยิงตรงเข้า RawBT)
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
@@ -174,8 +154,9 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsVerifyingPin(false); setIsPinModalOpen(false); setPinInput('')
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const isSuccess = await printSilentToRawBT(`\nเปิดลิ้นชักโดย: ${employeeData.name}\n\n`);
-      if (!isSuccess) navigator.share({ text: "." }).catch(()=>console.log('Cancelled'))
+      const textToPrint = DRAWER_KICK_CODE + `\nเปิดลิ้นชักโดย: ${employeeData.name}\n\n`;
+      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textToPrint)};package=ru.a402d.rawbtprinter;end`;
+      window.location.href = intentUrl;
     } else {
       setPrintReceipt({ isManualKick: true })
       setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
@@ -191,7 +172,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setPosCashToday(cCash); setPosTransferToday(cTransfer)
   }
 
-  // 🌟 ปิดกะส่งยอดแบบออโต้
+  // 🌟 ปิดกะส่งยอด (ยิงตรงเข้า RawBT)
   const submitCloseShift = async () => {
     if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้')
     const diff = Number(actualPosCash) - posCashToday
@@ -204,7 +185,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsClosingShift(false)
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const textCloseShift = `
+      const textCloseShift = DRAWER_KICK_CODE + `
 ใบนับเงินปิดกะ
 คิงส์สว่าง (หน้าร้าน POS)
 --------------------------------
@@ -221,17 +202,14 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 ลงชื่อแคชเชียร์ ......................
 \n\n`;
 
-      const isSuccess = await printSilentToRawBT(textCloseShift);
-      if (isSuccess) {
+      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textCloseShift)};package=ru.a402d.rawbtprinter;end`;
+      window.location.href = intentUrl;
+
+      setTimeout(() => {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
         localStorage.removeItem('kingsawang_session'); window.location.href = '/login';
-      } else {
-        navigator.share({ text: textCloseShift }).then(() => {
-          alert('✅ บันทึกยอดปิดกะเรียบร้อย'); localStorage.removeItem('kingsawang_session'); window.location.href = '/login';
-        }).catch(() => {
-          localStorage.removeItem('kingsawang_session'); window.location.href = '/login';
-        });
-      }
+      }, 1500);
+
     } else {
       setCloseShiftSlip({ id: slipId, date: printDateStr, cashAmount: posCashToday, transferAmount: posTransferToday, actualCash: Number(actualPosCash), diff, by: cashierName })
       setTimeout(() => { window.print(); setTimeout(() => { setCloseShiftSlip(null); localStorage.removeItem('kingsawang_session'); window.location.href = '/login' }, 1000) }, 1000)
@@ -412,18 +390,14 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
         </div>
       )}
 
-      {/* 🖨️ โซนแสดงผลการพิมพ์ (Fallback สำหรับบน PC Desktop) */}
+      {/* 🖨️ โซนแสดงผลการพิมพ์ (Fallback สำหรับ PC Desktop) */}
       {closeShiftSlip ? (
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
       ) : printReceipt && !printReceipt.isManualKick && (
         <div className="hidden print:block text-black font-sans bg-white mx-auto" style={printFormat === '58mm' ? { width: '50mm', padding: '0 2mm', fontSize: '11px' } : { width: '100%', maxWidth: '800px', padding: '40px', fontSize: '14px' }}>
-          {printFormat === '58mm' && (<><div className="text-center mb-2 mt-2"><h2 className="font-black text-[16px]">คิงส์สว่าง</h2><p className="text-[10px] mt-0.5">ใบเสร็จรับเงินอย่างย่อ</p></div><div className="text-[9px] mb-2 border-b border-black border-dashed pb-2"><p>เลขที่: {printReceipt.receiptNo}</p><p>วันที่: {printReceipt.date}</p><p>แคชเชียร์: {printReceipt.cashier}</p></div><table className="w-full text-[10px] mb-2"><tbody>{printReceipt.items.map((item: any, i: number) => (<tr key={i}><td className="py-0.5 pr-2 w-3/5 break-words">{item.name}</td><td className="text-center w-1/5">x{item.qty}</td><td className="text-right font-bold w-1/5">{(item.qty * item.price).toLocaleString()}</td></tr>))}</tbody></table><div className="border-t border-black border-dashed pt-2 space-y-1 text-[10px]"><div className="flex justify-between font-black text-[12px]"><p>ยอดสุทธิ</p><p>{printReceipt.total.toLocaleString()}</p></div><div className="flex justify-between"><p>รับเงิน ({printReceipt.method})</p><p>{printReceipt.received.toLocaleString()}</p></div><div className="flex justify-between"><p>เงินทอน</p><p>{printReceipt.change.toLocaleString()}</p></div></div><div className="text-center text-[9px] mt-4 pt-2 border-t border-black border-dashed"><p>ขอบคุณที่ใช้บริการครับ 🙏</p><p>---</p></div></>)}
-          {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: any, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
+          {/* ข้อมูลพรินต์สำหรับ PC (ถูกซ่อนบนแท็บเล็ต) */}
         </div>
       )}
-
-      {/* 🖨️ หน้าว่าง สำหรับเตะลิ้นชักแบบ Manual (Fallback สำหรับ PC) */}
-      {printReceipt && printReceipt.isManualKick && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
     </>
   )
 }
