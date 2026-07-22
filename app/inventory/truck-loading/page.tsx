@@ -11,7 +11,8 @@ export default function TruckLoadingPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  const [activeTab, setActiveTab] = useState<'form' | 'history'>('form')
+  // 🌟 เพิ่มสถานะ Tab 'return' (รับของคืน)
+  const [activeTab, setActiveTab] = useState<'form' | 'return' | 'history'>('form')
   const [products, setProducts] = useState<any[]>([])
   const [cart, setCart] = useState<any[]>([])
   const pathname = usePathname()
@@ -20,24 +21,30 @@ export default function TruckLoadingPage() {
   const [selectedShift, setSelectedShift] = useState('')
   const [note, setNote] = useState('')
   const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
-
-  // 🌟 State เก็บข้อมูลรถจาก Database
   const [truckRoutes, setTruckRoutes] = useState<any[]>([])
 
-  // History State
+  // --- History State ---
   const [historyDate, setHistoryDate] = useState(getTodayString())
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+
+  // 🌟 --- Return / Settlement State ---
+  const [pendingRoutes, setPendingRoutes] = useState<any[]>([])
+  const [selectedPendingId, setSelectedPendingId] = useState('')
+  const [returnItems, setReturnItems] = useState<any[]>([])
+  const [settleForm, setSettleForm] = useState({ cash: '', transfer: '', credit: '', expense: '', note: '' })
+  const [isLoadingPending, setIsLoadingPending] = useState(false)
 
   useEffect(() => {
     const session = localStorage.getItem('kingsawang_session')
     if (session) setEmployeeName(JSON.parse(session).name)
     fetchProducts()
-    fetchTruckRoutes() // 🌟 โหลดข้อมูลรถทันทีที่เปิดหน้า
+    fetchTruckRoutes() 
   }, [])
 
   useEffect(() => {
     if (activeTab === 'history') fetchHistory()
+    if (activeTab === 'return') fetchPendingRoutes()
   }, [activeTab, historyDate])
 
   const fetchProducts = async () => {
@@ -45,7 +52,6 @@ export default function TruckLoadingPage() {
     if (data) setProducts(data)
   }
 
-  // 🌟 ฟังก์ชันดึงสายรถจากระบบจัดการ
   const fetchTruckRoutes = async () => {
     const { data } = await supabase.from('truck_routes').select('*').eq('isActive', true).order('id')
     if (data) setTruckRoutes(data)
@@ -53,17 +59,20 @@ export default function TruckLoadingPage() {
 
   const fetchHistory = async () => {
     setIsLoadingHistory(true)
-    const { data } = await supabase
-      .from('route_settlements')
-      .select('*')
-      .eq('date', historyDate)
-      .order('createdAt', { ascending: false })
-    
+    const { data } = await supabase.from('route_settlements').select('*').eq('date', historyDate).order('createdAt', { ascending: false })
     if (data) {
       const validRecords = data.filter(r => r.details && (r.details.items || r.details.loadedItems))
       setHistoryRecords(validRecords)
     }
     setIsLoadingHistory(false)
+  }
+
+  // 🌟 ฟังก์ชันดึงบิลที่รอเคลียร์ยอด (pending)
+  const fetchPendingRoutes = async () => {
+    setIsLoadingPending(true)
+    const { data } = await supabase.from('route_settlements').select('*').eq('status', 'pending').order('createdAt', { ascending: true })
+    if (data) setPendingRoutes(data)
+    setIsLoadingPending(false)
   }
 
   const addToCart = (product: any) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
@@ -73,13 +82,9 @@ export default function TruckLoadingPage() {
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0)
   const expectedTotalAmount = cart.reduce((sum, item) => sum + (item.price * item.qty), 0)
 
-  // แจ้งเตือนถ้ารถคันนี้เบิกไปแล้ว
   const handleRouteSelection = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value
-    if (!selected) {
-      setSelectedRoute('')
-      return
-    }
+    if (!selected) { setSelectedRoute(''); return }
 
     const todayStr = getTodayString()
     const { data } = await supabase.from('route_settlements').select('details').eq('date', todayStr).eq('routeName', selected)
@@ -93,11 +98,7 @@ export default function TruckLoadingPage() {
         alertMsg += `[รายการเบิก ${shift}]\n${itemText}\n\n`
       })
       alertMsg += `คุณแน่ใจหรือไม่ ว่าต้องการเบิกสินค้า "เพิ่ม/ซ้ำ" ให้รถคันนี้อีกครั้ง?`
-
-      if (!window.confirm(alertMsg)) {
-        setSelectedRoute('')
-        return
-      }
+      if (!window.confirm(alertMsg)) { setSelectedRoute(''); return }
     }
     setSelectedRoute(selected)
   }
@@ -108,9 +109,7 @@ export default function TruckLoadingPage() {
 
     for (const item of cart) {
       const currentProd = products.find(p => p.id === item.id)
-      if (Number(currentProd?.stock || 0) < item.qty) {
-        return alert(`❌ สต๊อกไม่พอ! สินค้า "${item.name}" มีในคลังแค่ ${currentProd?.stock || 0} หน่วย แต่พยายามเบิก ${item.qty} หน่วย`)
-      }
+      if (Number(currentProd?.stock || 0) < item.qty) return alert(`❌ สต๊อกไม่พอ! สินค้า "${item.name}" มีในคลังแค่ ${currentProd?.stock || 0} หน่วย`)
     }
 
     const settlementId = `R-SET-${Date.now().toString().slice(-6)}`
@@ -121,28 +120,17 @@ export default function TruckLoadingPage() {
       expectedTotal: item.qty * item.price 
     }))
 
-    // ดึงชื่อคนขับออกมาจากวงเล็บ (เพื่อบันทึกลงบิล)
     let driverName = 'ไม่ระบุ'
-    if (selectedRoute.includes('(คนขับ:')) {
-      driverName = selectedRoute.split('(คนขับ: ')[1]?.replace(')', '') || 'ไม่ระบุ'
-    }
+    if (selectedRoute.includes('(คนขับ:')) driverName = selectedRoute.split('(คนขับ: ')[1]?.replace(')', '') || 'ไม่ระบุ'
 
     const { error } = await supabase.from('route_settlements').insert([{
       id: settlementId,
       date: new Date().toISOString().split('T')[0],
       createdAt: new Date().toISOString(),
-      routeName: selectedRoute,
-      driverName: driverName,
-      expectedAmount: expectedTotalAmount, 
-      status: 'pending', 
+      routeName: selectedRoute, driverName: driverName, expectedAmount: expectedTotalAmount, status: 'pending', 
       cashAmount: 0, transferAmount: 0, creditAmount: 0, expenseAmount: 0, returnAmount: 0, diffAmount: 0,
-      details: { 
-        shift: selectedShift,
-        items: loadedItemsForSettlement,
-        bagTracking: { loadedBags: totalItems, returnedBags: 0, lostBags: 0 }
-      },
-      note: note,
-      by: employeeName
+      details: { shift: selectedShift, items: loadedItemsForSettlement, bagTracking: { loadedBags: totalItems, returnedBags: 0, lostBags: 0 } },
+      note: note, by: employeeName
     }])
 
     if (error) return alert('เกิดข้อผิดพลาดในการสร้างบิล: ' + error.message)
@@ -195,6 +183,98 @@ export default function TruckLoadingPage() {
     fetchHistory(); fetchProducts()
   }
 
+  // 🌟 --- ระบบคำนวณและบันทึกการรับของคืน ---
+  const handleSelectPendingRoute = (record: any) => {
+    setSelectedPendingId(record.id)
+    const items = record.details?.items || record.details?.loadedItems || []
+    setReturnItems(items.map((i: any) => ({ ...i, returnedQty: 0, damagedQty: 0 })))
+    setSettleForm({ cash: '', transfer: '', credit: '', expense: '', note: '' })
+  }
+
+  const updateReturnQty = (productId: string, field: 'returnedQty' | 'damagedQty', val: string) => {
+    const num = Math.max(0, parseInt(val) || 0)
+    setReturnItems(prev => prev.map(item => {
+      if ((item.productId || item.id) === productId) {
+        let updated = { ...item, [field]: num }
+        // ของคืน + ของเสีย ต้องไม่เกินของที่เอาไป
+        if (updated.returnedQty + updated.damagedQty > updated.loadedQty) {
+          alert('❌ จำนวนของที่คืน + ของเสีย มากกว่าจำนวนที่เบิกไป!')
+          return item
+        }
+        return updated
+      }
+      return item
+    }))
+  }
+
+  const totalCalculatedSales = returnItems.reduce((sum, item) => sum + ((item.loadedQty - item.returnedQty - item.damagedQty) * item.price), 0)
+  const totalReceived = Number(settleForm.cash) + Number(settleForm.transfer) + Number(settleForm.credit) + Number(settleForm.expense)
+  const diffSettlement = totalReceived - totalCalculatedSales
+
+  const submitSettlement = async () => {
+    const record = pendingRoutes.find(r => r.id === selectedPendingId)
+    if (!record) return
+    if (!confirm('ยืนยันการเคลียร์ยอด? (สินค้าเหลือจะถูกนำกลับเข้าสต๊อกทันที)')) return
+
+    const finalItems = returnItems.map(item => {
+      const sold = item.loadedQty - item.returnedQty - item.damagedQty
+      return { ...item, soldQty: sold, expectedTotal: sold * item.price }
+    })
+
+    // 1. อัปเดตบิลให้สถานะ Completed พร้อมใส่ตัวเลขเงิน
+    const { error } = await supabase.from('route_settlements').update({
+      status: 'completed',
+      cashAmount: Number(settleForm.cash),
+      transferAmount: Number(settleForm.transfer),
+      creditAmount: Number(settleForm.credit),
+      expenseAmount: Number(settleForm.expense),
+      expectedAmount: totalCalculatedSales,
+      diffAmount: diffSettlement,
+      details: { ...record.details, items: finalItems },
+      note: record.note + (settleForm.note ? ` | เคลียร์ยอด: ${settleForm.note}` : '')
+    }).eq('id', selectedPendingId)
+
+    if (error) return alert('เกิดข้อผิดพลาด: ' + error.message)
+
+    // 2. ดึงของเหลือกลับเข้าคลัง
+    const stockPromises = finalItems.filter(i => i.returnedQty > 0).map(async (item) => {
+      const productId = item.productId || item.id
+      const { data: currentProd } = await supabase.from('products').select('stock').eq('id', productId).single()
+      if (currentProd) {
+        const newStock = Number(currentProd.stock) + Number(item.returnedQty)
+        return supabase.from('products').update({ stock: newStock }).eq('id', productId)
+      }
+    })
+
+    // 3. บันทึกประวัติ Log ของคืน / ของเสีย
+    const logPromises = finalItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
+      const productId = item.productId || item.id
+      const logs = []
+      if (item.returnedQty > 0) {
+        logs.push(supabase.from('inventory_logs').insert([{
+          id: `LOG-RET-${Date.now()}-${productId.slice(-4)}`,
+          productId, productName: item.name, type: 'IN', qty: item.returnedQty,
+          note: `รับคืนจากรถ ${record.routeName} (เคลียร์ยอด)`, by: employeeName
+        }]))
+      }
+      if (item.damagedQty > 0) {
+        logs.push(supabase.from('inventory_logs').insert([{
+          id: `LOG-DMG-${Date.now()}-${productId.slice(-4)}`,
+          productId, productName: item.name, type: 'OUT', qty: item.damagedQty,
+          note: `ของเสีย/ละลาย (รถ ${record.routeName})`, by: employeeName
+        }]))
+      }
+      return logs
+    }).flat()
+
+    await Promise.all([...stockPromises, ...logPromises])
+
+    alert('✅ บันทึกเคลียร์ยอดและรับของคืนเข้าคลังเรียบร้อย!')
+    setSelectedPendingId('')
+    fetchPendingRoutes()
+    fetchProducts()
+  }
+
   const TabletNav = () => (
     <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
       <Link href="/" className="bg-white p-3 md:p-3.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
@@ -215,9 +295,10 @@ export default function TruckLoadingPage() {
       {/* --- TOP BAR --- */}
       <div className="bg-white p-4 border-b border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 z-10">
         <TabletNav />
-        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto">
-          <button onClick={() => setActiveTab('form')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'form' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🚚 เบิกสินค้าขึ้นรถ</button>
-          <button onClick={() => setActiveTab('history')} className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'history' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🗂️ ประวัติการเบิกวันนี้</button>
+        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
+          <button onClick={() => setActiveTab('form')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'form' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🚚 1. โหลดของขึ้นรถ</button>
+          <button onClick={() => setActiveTab('return')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'return' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📦 2. รับของคืน (เคลียร์ยอด)</button>
+          <button onClick={() => setActiveTab('history')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'history' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🗂️ 3. ประวัติวันนี้</button>
         </div>
       </div>
 
@@ -253,15 +334,11 @@ export default function TruckLoadingPage() {
                 <label className="text-xs font-bold text-slate-600">เลือกรถสายส่ง / เส้นทาง <span className="text-rose-500">*</span></label>
                 <select value={selectedRoute} onChange={handleRouteSelection} className="w-full border-2 border-blue-200 px-4 py-3.5 rounded-xl font-bold focus:border-blue-500 bg-blue-50 text-blue-800 outline-none">
                   <option value="" disabled>-- เลือกสายส่ง --</option>
-                  {/* 🌟 แสดงรถที่ดึงมาจากระบบจัดการ */}
-                  {truckRoutes.map(r => {
-                    const routeNameFull = `${r.route_name} (คนขับ: ${r.driver_name})`
-                    return (
-                      <option key={r.id} value={routeNameFull}>
-                        {r.route_name} [ทะเบียน: {r.license_plate}] - {r.driver_name}
-                      </option>
-                    )
-                  })}
+                  {truckRoutes.map(r => (
+                    <option key={r.id} value={`${r.route_name} (คนขับ: ${r.driver_name})`}>
+                      {r.route_name} [ทะเบียน: {r.license_plate}] - {r.driver_name}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-2">
@@ -305,8 +382,109 @@ export default function TruckLoadingPage() {
               </button>
             </div>
           </div>
-
         </div>
+
+      ) : activeTab === 'return' ? (
+        /* 🌟 === RETURN / SETTLEMENT TAB === */
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          
+          {/* ซ้าย: เลือกรถที่กลับมา */}
+          <div className="w-full md:w-[350px] bg-white border-r border-slate-200 shadow-sm flex flex-col h-full shrink-0">
+            <div className="p-5 border-b border-slate-100 bg-slate-50"><h2 className="font-black text-slate-900 text-base">🚛 เลือกรถที่กลับมาส่งยอด</h2></div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {isLoadingPending ? (<p className="text-center text-slate-400 font-bold mt-10">⏳ กำลังโหลดข้อมูล...</p>) 
+              : pendingRoutes.length === 0 ? (<p className="text-center text-slate-400 font-bold mt-10">✅ ไม่มีรถค้างส่งยอด</p>) 
+              : pendingRoutes.map(record => (
+                <button key={record.id} onClick={() => handleSelectPendingRoute(record)} className={`w-full text-left p-4 rounded-2xl border-2 transition-all shadow-sm ${selectedPendingId === record.id ? 'bg-blue-50 border-blue-500 ring-4 ring-blue-500/20' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
+                  <p className="font-black text-slate-800 text-sm mb-1">{record.routeName}</p>
+                  <p className="font-bold text-slate-500 text-xs flex justify-between"><span>รอบ: {record.details?.shift}</span><span>บิล: {record.id.slice(-6)}</span></p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ขวา: ฟอร์มเคลียร์ยอด */}
+          <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
+            {!selectedPendingId ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-6xl">📝</span><p className="font-bold text-lg">เลือกรถจากเมนูด้านซ้ายเพื่อเริ่มเคลียร์ยอด</p></div>
+            ) : (
+              <div className="flex-1 overflow-y-auto p-4 md:p-8">
+                <div className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden max-w-4xl mx-auto">
+                  
+                  {/* หัวบิล */}
+                  <div className="p-6 border-b border-slate-200 bg-white">
+                    <h2 className="text-xl font-black text-slate-800 mb-2">ตรวจสอบสินค้าเหลือกลับ & เคลียร์ยอดเงิน</h2>
+                    <p className="text-sm font-bold text-slate-500">สายรถ: <span className="text-blue-600">{pendingRoutes.find(r => r.id === selectedPendingId)?.routeName}</span> | คนขับ: <span className="text-blue-600">{pendingRoutes.find(r => r.id === selectedPendingId)?.driverName}</span></p>
+                  </div>
+
+                  {/* ตารางสินค้า */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-100 border-b-2 border-slate-200 text-slate-600 text-xs">
+                        <tr>
+                          <th className="p-4 font-bold">สินค้า</th>
+                          <th className="p-4 font-black text-center w-24">เบิกไป</th>
+                          <th className="p-4 font-bold text-center w-32 text-orange-600">คืน (ดี)</th>
+                          <th className="p-4 font-bold text-center w-32 text-rose-600">เสีย/ละลาย</th>
+                          <th className="p-4 font-black text-right w-24 text-emerald-600">ขายได้</th>
+                          <th className="p-4 font-bold text-right w-28">รวมเงิน</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {returnItems.map((item, idx) => {
+                          const soldQty = item.loadedQty - item.returnedQty - item.damagedQty
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50">
+                              <td className="p-4 font-bold text-slate-700 text-sm">{item.name}</td>
+                              <td className="p-4 font-black text-center text-lg">{item.loadedQty}</td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.returnedQty || ''} onChange={e => updateReturnQty(item.productId || item.id, 'returnedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-orange-200 focus:border-orange-500 rounded-xl py-2 font-black text-orange-700 outline-none" /></td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.damagedQty || ''} onChange={e => updateReturnQty(item.productId || item.id, 'damagedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-rose-200 focus:border-rose-500 rounded-xl py-2 font-black text-rose-700 outline-none" /></td>
+                              <td className="p-4 font-black text-right text-lg text-emerald-600">{soldQty}</td>
+                              <td className="p-4 font-black text-right text-slate-800">{(soldQty * item.price).toLocaleString()}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* สรุปยอดเงิน */}
+                  <div className="p-6 bg-slate-50 border-t-2 border-slate-200">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                      {/* กรอกเงิน */}
+                      <div className="space-y-4">
+                        <h3 className="font-black text-slate-700 mb-3">💰 รายละเอียดการส่งเงิน</h3>
+                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">เงินสด:</span><input type="number" value={settleForm.cash} onChange={e => setSettleForm({...settleForm, cash: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
+                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">โอนสแกน:</span><input type="number" value={settleForm.transfer} onChange={e => setSettleForm({...settleForm, transfer: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
+                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">บิลเครดิต:</span><input type="number" value={settleForm.credit} onChange={e => setSettleForm({...settleForm, credit: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
+                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-rose-500 text-right">ค่าใช้จ่าย:</span><input type="number" value={settleForm.expense} onChange={e => setSettleForm({...settleForm, expense: e.target.value})} className="flex-1 border border-rose-300 rounded-xl p-3 font-black text-lg focus:border-rose-500 outline-none text-rose-600" placeholder="ค่าน้ำมัน, เบี้ยเลี้ยง" /></div>
+                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">หมายเหตุ:</span><input type="text" value={settleForm.note} onChange={e => setSettleForm({...settleForm, note: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-bold text-sm focus:border-blue-500 outline-none" placeholder="รายละเอียดเพิ่มเติม..." /></div>
+                      </div>
+                      
+                      {/* สรุปส่วนต่าง */}
+                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-inner flex flex-col justify-center">
+                        <div className="flex justify-between items-center mb-3 border-b border-dashed border-slate-300 pb-3"><span className="font-bold text-slate-500 text-base">ยอดขายที่ต้องส่ง</span><span className="font-black text-2xl text-slate-800">{totalCalculatedSales.toLocaleString()} บ.</span></div>
+                        <div className="flex justify-between items-center mb-5"><span className="font-bold text-slate-500 text-base">ยอดเงินรวมที่รับมา</span><span className="font-black text-2xl text-emerald-600">{totalReceived.toLocaleString()} บ.</span></div>
+                        
+                        <div className={`p-4 rounded-xl text-center border-2 ${diffSettlement === 0 ? 'bg-emerald-50 border-emerald-200' : diffSettlement > 0 ? 'bg-blue-50 border-blue-200' : 'bg-rose-50 border-rose-200'}`}>
+                          <p className={`font-bold text-xs mb-1 ${diffSettlement === 0 ? 'text-emerald-700' : diffSettlement > 0 ? 'text-blue-700' : 'text-rose-700'}`}>ส่วนต่าง (เงินขาด / เกิน)</p>
+                          <p className={`font-black text-3xl ${diffSettlement === 0 ? 'text-emerald-600' : diffSettlement > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
+                            {diffSettlement === 0 ? 'พอดีเป๊ะ' : diffSettlement > 0 ? `เกิน +${diffSettlement.toLocaleString()}` : `ขาด ${diffSettlement.toLocaleString()}`}
+                          </p>
+                        </div>
+
+                        <button onClick={submitSettlement} className="w-full mt-6 bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-lg flex items-center justify-center gap-2">
+                          💾 บันทึกรับเงิน & คืนสต๊อก
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
       ) : (
         /* === HISTORY TAB === */
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/50">
@@ -334,8 +512,8 @@ export default function TruckLoadingPage() {
                         <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="p-4"><p className="font-bold text-slate-800">{new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</p><p className="text-[10px] text-slate-400 mt-1">{record.id}</p></td>
                           <td className="p-4"><p className="font-black text-blue-700">{record.routeName}</p><p className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-bold w-fit mt-1">รอบ {record.details?.shift || '-'}</p></td>
-                          <td className="p-4 text-center">{record.status === 'pending' ? (<span className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1 rounded-full font-bold text-[10px]">⏳ รอรถกลับมาเคลียร์</span>) : (<span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px]">✅ เคลียร์ยอดแล้ว</span>)}</td>
-                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: any, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span></li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
+                          <td className="p-4 text-center">{record.status === 'pending' ? (<span className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1 rounded-full font-bold text-[10px]">⏳ รอเคลียร์</span>) : (<span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px]">✅ เคลียร์แล้ว</span>)}</td>
+                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: any, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span> {i.returnedQty > 0 && <span className="text-orange-500">(คืน {i.returnedQty})</span>} {i.damagedQty > 0 && <span className="text-rose-500">(เสีย {i.damagedQty})</span>}</li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
                           <td className="p-4 text-center font-bold text-slate-600">{record.by}</td>
                           <td className="p-4 text-center">{record.status === 'pending' ? (<button onClick={() => handleCancelLoad(record)} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white font-bold text-[10px] rounded-lg transition-colors border border-rose-200 shadow-sm">✕ ยกเลิกบิล</button>) : (<span className="text-[10px] text-slate-300 font-bold">- ล็อก -</span>)}</td>
                         </tr>
