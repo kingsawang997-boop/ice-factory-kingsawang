@@ -16,6 +16,7 @@ export default function POSPage() {
   const [isFreeBill, setIsFreeBill] = useState(false)
   const [cashierName, setCashierName] = useState('พนักงาน')
   
+  // 🌟 ข้อ 2: ตั้งค่าเริ่มต้นเป็น 58mm ทันทีเป็นพื้นฐาน
   const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
   const [printReceipt, setPrintReceipt] = useState<any>(null)
 
@@ -38,7 +39,7 @@ export default function POSPage() {
     }
     
     fetchActiveProducts()
-    if (window.innerWidth > 1024) setPrintFormat('A4')
+    // เอาตัวเช็ค window.innerWidth ออก เพื่อให้ 58mm เป็นค่าเริ่มต้นเสมอตามที่คุณต้องการ
   }, [])
 
   const fetchActiveProducts = async () => {
@@ -67,7 +68,7 @@ export default function POSPage() {
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
   // ==========================================
-  // 🌟 สุดยอดเครื่องมือแปลงภาพเป็นใบเสร็จ (Graphic Mode)
+  // 🌟 ฟังก์ชันแปลงภาพเป็น ESC/POS (Graphic Mode สำหรับ 58mm)
   // ==========================================
   const getEscPosImageBytes = (canvas: HTMLCanvasElement) => {
     const widthBytes = Math.ceil(canvas.width / 8);
@@ -76,7 +77,6 @@ export default function POSPage() {
     if (!imgData) return new Uint8Array();
     
     const buffer = new Uint8Array(8 + (widthBytes * height));
-    // คำสั่งพิมพ์ภาพแบบ Raster (GS v 0)
     buffer.set([29, 118, 48, 0, widthBytes & 0xFF, (widthBytes >> 8) & 0xFF, height & 0xFF, (height >> 8) & 0xFF], 0);
     
     let offset = 8;
@@ -87,7 +87,6 @@ export default function POSPage() {
           const px = (x * 8) + bit;
           if (px < canvas.width) {
             const idx = (y * canvas.width + px) * 4;
-            // เช็คความเข้มของเม็ดสี (ดำ = 1, ขาว = 0)
             if (imgData[idx + 3] > 128 && (imgData[idx] + imgData[idx + 1] + imgData[idx + 2]) / 3 < 128) {
               byte |= (1 << (7 - bit));
             }
@@ -100,11 +99,8 @@ export default function POSPage() {
   }
 
   const sendToRawBT = (imageBuffer: Uint8Array) => {
-    // คำสั่งเตะลิ้นชัก (ESC p 0 60 255)
     const kickDrawer = [27, 112, 0, 60, 255]; 
-    // คำสั่งป้อนกระดาษ 3 บรรทัด (LF)
     const feedLines = [10, 10, 10];
-    
     const payload = new Uint8Array([...kickDrawer, ...imageBuffer, ...feedLines]);
     
     let binaryString = '';
@@ -114,13 +110,12 @@ export default function POSPage() {
     window.location.href = `rawbt:base64,${btoa(binaryString)}`;
   }
 
-  // วาดสลิปขาย
   const drawReceiptAndPrint = (billNo: string, dateStr: string, cashier: string, cartItems: any[], total: number, received: number, changeAmount: number) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    canvas.width = 384; // 58mm กว้างสุดคือ 384 จุด
+    canvas.width = 384; 
     canvas.height = 500 + (cartItems.length * 60);
 
     ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -135,7 +130,6 @@ export default function POSPage() {
     ctx.fillText(`วันที่: ${dateStr}`, 10, y); y += 30;
     ctx.fillText(`พนักงาน: ${cashier}`, 10, y); y += 30;
 
-    // เส้นประ
     ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(10, y); ctx.lineTo(374, y); ctx.stroke(); ctx.setLineDash([]); y += 15;
 
     cartItems.forEach(item => {
@@ -154,7 +148,6 @@ export default function POSPage() {
 
     ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('ขอบคุณที่ใช้บริการครับ 🙏', 192, y); y += 40;
 
-    // ครอปภาพส่วนที่ไม่ได้ใช้
     const finalCanvas = document.createElement('canvas');
     finalCanvas.width = 384; finalCanvas.height = y;
     finalCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
@@ -163,6 +156,7 @@ export default function POSPage() {
   }
   // ==========================================
 
+  // 🚀 ข้อ 1: จัดการการพิมพ์แยกตาม Format (58mm ใช้ RawBT / A4 ใช้ระบบ Browser Print)
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -195,14 +189,22 @@ export default function POSPage() {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
-      if (isMobileDevice() && printFormat === '58mm') {
-        // 🚀 สั่งพิมพ์เป็นรูปภาพ ลิ้นชักเด้ง ภาษาไทยครบ 100%
+      const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
+
+      if (printFormat === '58mm' && isMobileDevice()) {
         drawReceiptAndPrint(billNo, printDateStr, cashierName, cart, totalAmount, actualReceive, finalChange);
         setTimeout(() => { clearCart(); fetchActiveProducts(); }, 1000);
       } else {
-        const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
+        // 🌟 แก้ไขข้อ 1: รองรับการพิมพ์ A4 ทั้งบนมือถือและคอมพิวเตอร์
         setPrintReceipt(receiptData)
-        setTimeout(() => { window.print(); setTimeout(() => { setPrintReceipt(null); clearCart(); fetchActiveProducts() }, 1000) }, 1000)
+        setTimeout(() => { 
+          window.print(); 
+          setTimeout(() => { 
+            setPrintReceipt(null); 
+            clearCart(); 
+            fetchActiveProducts() 
+          }, 1000) 
+        }, 500)
       }
     }
   }
@@ -392,52 +394,56 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🚀 Modal: หน้าต่างรับชำระเงิน */}
+      {/* 🚀 Modal: หน้าต่างรับชำระเงิน (🌟 ข้อ 3: จัดทรงใหม่ป้องกันแป้นพิมพ์บังจอแบบ POS แท้) */}
       {isCheckoutModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-black text-lg text-slate-900">💵 รับชำระเงิน</h3>
-              <button onClick={() => {setIsCheckoutModalOpen(false); setIsFreeBill(false); setCashReceived('')}} className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-rose-50 hover:text-rose-500 font-bold transition-colors">✕</button>
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 bg-slate-900/70 backdrop-blur-sm print:hidden overflow-y-auto">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col my-auto animate-in zoom-in-95 duration-200 border border-slate-100">
+            
+            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-black text-base text-slate-900">💵 รับชำระเงิน</h3>
+              <button onClick={() => {setIsCheckoutModalOpen(false); setIsFreeBill(false); setCashReceived('')}} className="w-7 h-7 rounded-full bg-white border border-slate-200 text-slate-400 hover:bg-rose-50 hover:text-rose-500 font-bold transition-colors flex items-center justify-center">✕</button>
             </div>
             
-            <div className="p-6 space-y-5">
-              <label className={`flex items-center justify-center gap-3 p-4 rounded-xl border-2 transition-all cursor-pointer ${isFreeBill ? 'bg-orange-50 border-orange-400 text-orange-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
-                <input type="checkbox" checked={isFreeBill} onChange={(e) => {setIsFreeBill(e.target.checked); setPaymentMethod('cash'); setCashReceived('');}} className="w-5 h-5 accent-orange-500 rounded" />
-                <span className="font-bold text-sm">🎁 ให้ฟรี / เป็นของแถม (ไม่เตะลิ้นชัก)</span>
+            <div className="p-4 space-y-3">
+              <label className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition-all cursor-pointer ${isFreeBill ? 'bg-orange-50 border-orange-400 text-orange-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                <input type="checkbox" checked={isFreeBill} onChange={(e) => {setIsFreeBill(e.target.checked); setPaymentMethod('cash'); setCashReceived('');}} className="w-4 h-4 accent-orange-500 rounded" />
+                <span className="font-bold text-xs">🎁 ให้ฟรี / เป็นของแถม (ไม่เตะลิ้นชัก)</span>
               </label>
 
-              <div className="flex justify-between items-end border-b-2 border-slate-100 pb-4">
-                <span className="font-bold text-slate-500 text-sm mb-1">ยอดที่ต้องชำระ:</span>
-                <span className={`text-5xl font-black tracking-tight ${isFreeBill ? 'text-orange-500 line-through decoration-rose-500 decoration-4' : 'text-slate-900'}`}>{subTotal.toLocaleString()}<span className="text-xl font-bold ml-1">บ.</span></span>
+              <div className="flex justify-between items-end border-b border-slate-100 pb-2">
+                <span className="font-bold text-slate-500 text-xs">ยอดที่ต้องชำระ:</span>
+                <span className={`text-3xl font-black tracking-tight ${isFreeBill ? 'text-orange-500 line-through decoration-rose-500 decoration-4' : 'text-slate-900'}`}>{subTotal.toLocaleString()}<span className="text-sm font-bold ml-1">บ.</span></span>
               </div>
 
               {!isFreeBill && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                  <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-xl">
-                    <button onClick={() => setPaymentMethod('cash')} className={`py-3 rounded-lg font-bold text-sm transition-all shadow-sm ${paymentMethod === 'cash' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>💵 เงินสด</button>
-                    <button onClick={() => {setPaymentMethod('transfer'); setCashReceived('');}} className={`py-3 rounded-lg font-bold text-sm transition-all shadow-sm ${paymentMethod === 'transfer' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📱 โอนเงิน (QR)</button>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-1.5 bg-slate-100 p-1 rounded-xl">
+                    <button onClick={() => setPaymentMethod('cash')} className={`py-2 rounded-lg font-bold text-xs transition-all shadow-sm ${paymentMethod === 'cash' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>💵 เงินสด</button>
+                    <button onClick={() => {setPaymentMethod('transfer'); setCashReceived('');}} className={`py-2 rounded-lg font-bold text-xs transition-all shadow-sm ${paymentMethod === 'transfer' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📱 โอนเงิน (QR)</button>
                   </div>
 
                   {paymentMethod === 'cash' && (
-                    <div className="space-y-3">
-                      <input type="number" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="รับเงินมา..." className="w-full bg-slate-50 border-2 border-slate-200 px-4 py-4 rounded-xl focus:outline-none focus:border-blue-500 font-black text-3xl text-center text-slate-800 shadow-inner" autoFocus />
-                      <div className="grid grid-cols-4 gap-2">
-                        <button onClick={exactCash} className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 py-3 rounded-lg font-black border border-emerald-200 text-sm transition-colors">พอดี</button>
+                    <div className="space-y-2.5">
+                      {/* 🌟 ช่องกรอกแบบกระชับไม่ดันจอแตก */}
+                      <input type="number" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="รับเงินมา..." className="w-full bg-slate-50 border-2 border-slate-200 px-3 py-2.5 rounded-xl focus:outline-none focus:border-blue-500 font-black text-2xl text-center text-slate-800 shadow-inner" />
+                      
+                      <div className="grid grid-cols-4 gap-1.5">
+                        <button onClick={exactCash} className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 py-2 rounded-lg font-black border border-emerald-200 text-xs transition-colors">พอดี</button>
                         {[100, 500, 1000].map(amt => (
-                          <button key={amt} onClick={() => addQuickCash(amt)} className="bg-white border border-slate-200 hover:bg-slate-50 py-3 rounded-lg font-black text-slate-700 text-sm transition-colors">+{amt}</button>
+                          <button key={amt} onClick={() => addQuickCash(amt)} className="bg-white border border-slate-200 hover:bg-slate-50 py-2 rounded-lg font-black text-slate-700 text-xs transition-colors">+{amt}</button>
                         ))}
                       </div>
-                      <div className="flex justify-between items-center bg-rose-50 p-5 rounded-xl border border-rose-100">
-                        <span className="font-bold text-rose-600 text-sm">เงินทอน:</span>
-                        <span className="font-black text-4xl text-rose-600 tracking-tight">{change > 0 ? change.toLocaleString() : '0'}</span>
+
+                      <div className="flex justify-between items-center bg-rose-50 p-3 rounded-xl border border-rose-100">
+                        <span className="font-bold text-rose-600 text-xs">เงินทอน:</span>
+                        <span className="font-black text-2xl text-rose-600 tracking-tight">{change > 0 ? change.toLocaleString() : '0'}</span>
                       </div>
                     </div>
                   )}
                 </div>
               )}
 
-              <button onClick={handleCheckout} className={`w-full text-white font-black py-4 rounded-xl shadow-lg text-lg transition-transform active:scale-95 flex items-center justify-center gap-2 ${isFreeBill || paymentMethod === 'transfer' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'}`}>
+              <button onClick={handleCheckout} className={`w-full text-white font-black py-3.5 rounded-xl shadow-lg text-sm transition-transform active:scale-95 flex items-center justify-center gap-2 ${isFreeBill || paymentMethod === 'transfer' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30' : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'}`}>
                 {isFreeBill || paymentMethod === 'transfer' ? '💾 บันทึกยอด (ไม่เตะลิ้นชัก)' : '🖨️ พิมพ์ใบเสร็จ & เปิดลิ้นชัก'}
               </button>
             </div>
@@ -480,14 +486,16 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🖨️ โซนแสดงผลการพิมพ์ (Fallback สำหรับ PC Desktop) */}
+      {/* 🖨️ โซนแสดงผลการพิมพ์ (ซ่อนตอนอยู่บนแท็บเล็ต 58mm แต่แสดงผลจริงเมื่อกดพิมพ์ A4 หรือหน้าปิดกะ) */}
       {closeShiftSlip ? (
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
       ) : printReceipt && !printReceipt.isManualKick && (
         <div className="hidden print:block text-black font-sans bg-white mx-auto" style={printFormat === '58mm' ? { width: '50mm', padding: '0 2mm', fontSize: '11px' } : { width: '100%', maxWidth: '800px', padding: '40px', fontSize: '14px' }}>
-          {/* ข้อมูลพรินต์สำหรับ PC (ถูกซ่อนบนแท็บเล็ต) */}
+          {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: any, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระเงินโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
         </div>
       )}
+
+      {printReceipt && printReceipt.isManualKick && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
     </>
   )
 }
