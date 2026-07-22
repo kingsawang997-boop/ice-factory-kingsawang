@@ -66,26 +66,38 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันแปลงภาษาเครื่อง (เตะลิ้นชัก + ภาษาไทย)
+  // 🚀 ฟังก์ชันขั้นเทพ: เตะลิ้นชัก + แปลงฟอนต์ไทย (CP874) แบบฝังในตัว
   const getRawBTUrl = (text: string) => {
-    // 1. ปรับรหัสเตะลิ้นชักใหม่ ให้ปลอดภัย 100% กับการแปลงภาษา
-    // ใช้ \x30 (เลข 0) แทน \x00 เพื่อป้องกันข้อความขาดหาย 
-    // และใช้ \x78 แทน \xFF เพื่อให้รองรับรหัส UTF-8 (ภาษาไทย) ได้อย่างสมบูรณ์
-    const kickCode = "\x1B\x70\x30\x3C\x78"; 
+    // 1. รหัสภาษาเครื่องสำหรับเตะลิ้นชัก (ESC p 0 60 255)
+    const kickDrawerBytes = [27, 112, 0, 60, 255]; 
     
-    // เอาโค้ดเตะลิ้นชัก แปะไว้บนสุดของใบเสร็จ
-    const fullText = kickCode + text;
-    
-    // 2. แปลงข้อความทั้งหมดเป็นรูปแบบ UTF-8 (รักษาภาษาไทยไว้ไม่ให้เพี้ยน)
-    const utf8Bytes = new TextEncoder().encode(fullText);
-    let binaryString = '';
-    for (let i = 0; i < utf8Bytes.byteLength; i++) {
-      binaryString += String.fromCharCode(utf8Bytes[i]);
+    // 2. แปลงภาษาไทย (UTF-8) ให้เป็นภาษาที่เครื่องปริ้นสลิปเข้าใจ (CP874 / TIS-620)
+    const textBytes = [];
+    for (let i = 0; i < text.length; i++) {
+      const charCode = text.charCodeAt(i);
+      
+      if (charCode >= 0x0E00 && charCode <= 0x0E7F) {
+        // ถ้าเป็นอักษร/สระภาษาไทย ให้แปลงรหัสข้ามไปเป็น CP874
+        textBytes.push(charCode - 0x0E00 + 0xA0);
+      } else if (charCode < 128) {
+        // ถ้าเป็นภาษาอังกฤษ ตัวเลข การเว้นวรรค หรือขึ้นบรรทัดใหม่ (ASCII) ปล่อยผ่าน
+        textBytes.push(charCode);
+      } else {
+        // สัญลักษณ์แปลกๆ ที่เครื่องปริ้นไม่รู้จัก ให้แทนด้วย '?' เพื่อป้องกันเครื่องเอ๋อ
+        textBytes.push(63); 
+      }
     }
     
-    // 3. 🌟 ทีเด็ดอยู่ตรงนี้: ส่งเป็น data:text/plain;charset=utf-8 
-    // เพื่อบังคับให้แอป RawBT จัดการฟอนต์ภาษาไทยให้อัตโนมัติ ก่อนสั่งปริ้น
-    return `rawbt:data:text/plain;charset=utf-8;base64,${btoa(binaryString)}`;
+    // 3. เอาคำสั่งเตะลิ้นชัก มารวมกับข้อความใบเสร็จที่แปลงภาษาแล้ว
+    const combined = new Uint8Array([...kickDrawerBytes, ...textBytes]);
+    
+    // 4. บีบอัดเป็น Base64 แล้วส่งยิงตรงเข้าแอป RawBT
+    let binaryString = '';
+    for (let i = 0; i < combined.length; i++) {
+      binaryString += String.fromCharCode(combined[i]);
+    }
+    
+    return `rawbt:base64,${btoa(binaryString)}`;
   }
 
   const handleCheckout = async () => {
