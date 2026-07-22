@@ -11,7 +11,6 @@ export default function TruckLoadingPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  // 🌟 เพิ่มสถานะ Tab 'return' (รับของคืน)
   const [activeTab, setActiveTab] = useState<'form' | 'return' | 'history'>('form')
   const [products, setProducts] = useState<any[]>([])
   const [cart, setCart] = useState<any[]>([])
@@ -28,11 +27,11 @@ export default function TruckLoadingPage() {
   const [historyRecords, setHistoryRecords] = useState<any[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
-  // 🌟 --- Return / Settlement State ---
-  const [pendingRoutes, setPendingRoutes] = useState<any[]>([])
-  const [selectedPendingId, setSelectedPendingId] = useState('')
+  // 🌟 --- Return / Settlement State (รวมบิลตามสายรถ) ---
+  const [pendingGroups, setPendingGroups] = useState<any[]>([])
+  const [selectedRouteKey, setSelectedRouteKey] = useState('') // ใช้ชื่อสายรถเป็น Key หลัก
   const [returnItems, setReturnItems] = useState<any[]>([])
-  const [settleForm, setSettleForm] = useState({ cash: '', transfer: '', credit: '', expense: '', note: '' })
+  const [bagForm, setBagForm] = useState({ returnedEmptyBags: '', pendingBags: '', note: '' })
   const [isLoadingPending, setIsLoadingPending] = useState(false)
 
   useEffect(() => {
@@ -44,7 +43,7 @@ export default function TruckLoadingPage() {
 
   useEffect(() => {
     if (activeTab === 'history') fetchHistory()
-    if (activeTab === 'return') fetchPendingRoutes()
+    if (activeTab === 'return') fetchPendingRoutesGrouped()
   }, [activeTab, historyDate])
 
   const fetchProducts = async () => {
@@ -67,11 +66,26 @@ export default function TruckLoadingPage() {
     setIsLoadingHistory(false)
   }
 
-  // 🌟 ฟังก์ชันดึงบิลที่รอเคลียร์ยอด (pending)
-  const fetchPendingRoutes = async () => {
+  // 🌟 ดึงบิลที่รอเคลียร์ และจัดกลุ่มรวมตาม "สายรถ (routeName)"
+  const fetchPendingRoutesGrouped = async () => {
     setIsLoadingPending(true)
     const { data } = await supabase.from('route_settlements').select('*').eq('status', 'pending').order('createdAt', { ascending: true })
-    if (data) setPendingRoutes(data)
+    
+    if (data) {
+      const groupsMap: { [key: string]: any } = {}
+      data.forEach(record => {
+        const key = record.routeName
+        if (!groupsMap[key]) {
+          groupsMap[key] = {
+            routeName: key,
+            driverName: record.driverName,
+            records: []
+          }
+        }
+        groupsMap[key].records.push(record)
+      })
+      setPendingGroups(Object.values(groupsMap))
+    }
     setIsLoadingPending(false)
   }
 
@@ -113,7 +127,6 @@ export default function TruckLoadingPage() {
     }
 
     const settlementId = `R-SET-${Date.now().toString().slice(-6)}`
-    
     const loadedItemsForSettlement = cart.map(item => ({
       productId: item.id, name: item.name, price: item.price,
       loadedQty: item.qty, returnedQty: 0, damagedQty: 0, soldQty: 0,          
@@ -183,22 +196,41 @@ export default function TruckLoadingPage() {
     fetchHistory(); fetchProducts()
   }
 
-  // 🌟 --- ระบบคำนวณและบันทึกการรับของคืน ---
-  const handleSelectPendingRoute = (record: any) => {
-    setSelectedPendingId(record.id)
-    const items = record.details?.items || record.details?.loadedItems || []
-    setReturnItems(items.map((i: any) => ({ ...i, returnedQty: 0, damagedQty: 0 })))
-    setSettleForm({ cash: '', transfer: '', credit: '', expense: '', note: '' })
+  // 🌟 --- เลือกรถเพื่อรวมยอดทุกกะมาแสดง ---
+  const handleSelectRouteGroup = (group: any) => {
+    setSelectedRouteKey(group.routeName)
+    
+    // รวมสินค้าจากทุกกะเข้าด้วยกัน
+    const itemMap: { [productId: string]: any } = {}
+    group.records.forEach((rec: any) => {
+      const items = rec.details?.items || rec.details?.loadedItems || []
+      items.forEach((i: any) => {
+        const pId = i.productId || i.id
+        if (!itemMap[pId]) {
+          itemMap[pId] = {
+            productId: pId,
+            name: i.name,
+            price: i.price,
+            loadedQty: 0,
+            returnedQty: 0,
+            damagedQty: 0
+          }
+        }
+        itemMap[pId].loadedQty += Number(i.loadedQty || i.qty || 0)
+      })
+    })
+
+    setReturnItems(Object.values(itemMap))
+    setBagForm({ returnedEmptyBags: '', pendingBags: '', note: '' })
   }
 
   const updateReturnQty = (productId: string, field: 'returnedQty' | 'damagedQty', val: string) => {
     const num = Math.max(0, parseInt(val) || 0)
     setReturnItems(prev => prev.map(item => {
-      if ((item.productId || item.id) === productId) {
+      if (item.productId === productId) {
         let updated = { ...item, [field]: num }
-        // ของคืน + ของเสีย ต้องไม่เกินของที่เอาไป
         if (updated.returnedQty + updated.damagedQty > updated.loadedQty) {
-          alert('❌ จำนวนของที่คืน + ของเสีย มากกว่าจำนวนที่เบิกไป!')
+          alert('❌ จำนวนของที่คืน + ของเสีย มากกว่าจำนวนรวมที่เบิกไป!')
           return item
         }
         return updated
@@ -208,60 +240,46 @@ export default function TruckLoadingPage() {
   }
 
   const totalCalculatedSales = returnItems.reduce((sum, item) => sum + ((item.loadedQty - item.returnedQty - item.damagedQty) * item.price), 0)
-  const totalReceived = Number(settleForm.cash) + Number(settleForm.transfer) + Number(settleForm.credit) + Number(settleForm.expense)
-  const diffSettlement = totalReceived - totalCalculatedSales
 
+  // 🌟 บันทึกเคลียร์ยอด (อัปเดตทุกบิลของรถคันนี้ให้เป็น completed พร้อมเก็บกระสอบ)
   const submitSettlement = async () => {
-    const record = pendingRoutes.find(r => r.id === selectedPendingId)
-    if (!record) return
-    if (!confirm('ยืนยันการเคลียร์ยอด? (สินค้าเหลือจะถูกนำกลับเข้าสต๊อกทันที)')) return
+    const group = pendingGroups.find(g => g.routeName === selectedRouteKey)
+    if (!group) return
+    if (!confirm('ยืนยันการเคลียร์ยอดและรับคืนสินค้าทั้งหมดของรถคันนี้?')) return
 
-    const finalItems = returnItems.map(item => {
-      const sold = item.loadedQty - item.returnedQty - item.damagedQty
-      return { ...item, soldQty: sold, expectedTotal: sold * item.price }
+    // 1. อัปเดตทุกบิลในกลุ่มให้เป็น completed
+    const updatePromises = group.records.map(async (record: any) => {
+      return supabase.from('route_settlements').update({
+        status: 'completed',
+        note: record.note + (bagForm.note ? ` | คืนกระสอบ(เปล่า:${bagForm.returnedEmptyBags || 0}, ค้าง:${bagForm.pendingBags || 0}) ${bagForm.note}` : '')
+      }).eq('id', record.id)
     })
+    await Promise.all(updatePromises)
 
-    // 1. อัปเดตบิลให้สถานะ Completed พร้อมใส่ตัวเลขเงิน
-    const { error } = await supabase.from('route_settlements').update({
-      status: 'completed',
-      cashAmount: Number(settleForm.cash),
-      transferAmount: Number(settleForm.transfer),
-      creditAmount: Number(settleForm.credit),
-      expenseAmount: Number(settleForm.expense),
-      expectedAmount: totalCalculatedSales,
-      diffAmount: diffSettlement,
-      details: { ...record.details, items: finalItems },
-      note: record.note + (settleForm.note ? ` | เคลียร์ยอด: ${settleForm.note}` : '')
-    }).eq('id', selectedPendingId)
-
-    if (error) return alert('เกิดข้อผิดพลาด: ' + error.message)
-
-    // 2. ดึงของเหลือกลับเข้าคลัง
-    const stockPromises = finalItems.filter(i => i.returnedQty > 0).map(async (item) => {
-      const productId = item.productId || item.id
-      const { data: currentProd } = await supabase.from('products').select('stock').eq('id', productId).single()
+    // 2. คืนสต๊อกสินค้าที่เหลือกลับเข้าคลัง
+    const stockPromises = returnItems.filter(i => i.returnedQty > 0).map(async (item) => {
+      const { data: currentProd } = await supabase.from('products').select('stock').eq('id', item.productId).single()
       if (currentProd) {
         const newStock = Number(currentProd.stock) + Number(item.returnedQty)
-        return supabase.from('products').update({ stock: newStock }).eq('id', productId)
+        return supabase.from('products').update({ stock: newStock }).eq('id', item.productId)
       }
     })
 
-    // 3. บันทึกประวัติ Log ของคืน / ของเสีย
-    const logPromises = finalItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
-      const productId = item.productId || item.id
+    // 3. บันทึก Log
+    const logPromises = returnItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
       const logs = []
       if (item.returnedQty > 0) {
         logs.push(supabase.from('inventory_logs').insert([{
-          id: `LOG-RET-${Date.now()}-${productId.slice(-4)}`,
-          productId, productName: item.name, type: 'IN', qty: item.returnedQty,
-          note: `รับคืนจากรถ ${record.routeName} (เคลียร์ยอด)`, by: employeeName
+          id: `LOG-RET-${Date.now()}-${item.productId.slice(-4)}`,
+          productId: item.productId, productName: item.name, type: 'IN', qty: item.returnedQty,
+          note: `รับคืนจากรถ ${group.routeName} (เคลียร์ยอดรวมทุกกะ)`, by: employeeName
         }]))
       }
       if (item.damagedQty > 0) {
         logs.push(supabase.from('inventory_logs').insert([{
-          id: `LOG-DMG-${Date.now()}-${productId.slice(-4)}`,
-          productId, productName: item.name, type: 'OUT', qty: item.damagedQty,
-          note: `ของเสีย/ละลาย (รถ ${record.routeName})`, by: employeeName
+          id: `LOG-DMG-${Date.now()}-${item.productId.slice(-4)}`,
+          productId: item.productId, productName: item.name, type: 'OUT', qty: item.damagedQty,
+          note: `ของเสีย/ละลาย (รถ ${group.routeName})`, by: employeeName
         }]))
       }
       return logs
@@ -269,9 +287,9 @@ export default function TruckLoadingPage() {
 
     await Promise.all([...stockPromises, ...logPromises])
 
-    alert('✅ บันทึกเคลียร์ยอดและรับของคืนเข้าคลังเรียบร้อย!')
-    setSelectedPendingId('')
-    fetchPendingRoutes()
+    alert('✅ บันทึกเคลียร์ยอดและรับของคืนเข้าคลังเรียบร้อยแล้ว!')
+    setSelectedRouteKey('')
+    fetchPendingRoutesGrouped()
     fetchProducts()
   }
 
@@ -306,10 +324,8 @@ export default function TruckLoadingPage() {
       {activeTab === 'form' ? (
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
           
-          {/* ซ้าย: เลือกสินค้า */}
           <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden relative h-full">
             <h2 className="font-black text-slate-800 text-base md:text-lg mb-4 shrink-0 flex items-center gap-2">🧊 เลือกสินค้าเพื่อจ่ายขึ้นรถ</h2>
-            
             <div className="flex-1 overflow-y-auto pr-2 pb-24 md:pb-0 scrollbar-hide">
               <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {products.map(product => (
@@ -325,7 +341,6 @@ export default function TruckLoadingPage() {
             </div>
           </div>
 
-          {/* ขวา: ฟอร์มจ่ายขึ้นรถ */}
           <div className="w-full md:w-[400px] lg:w-[450px] bg-white shadow-2xl flex flex-col h-[80vh] md:h-full fixed md:relative bottom-0 z-20 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300 border-l border-slate-200">
             <div className="p-6 border-b border-slate-100 bg-slate-50 shrink-0"><h2 className="font-black text-slate-900 text-lg flex items-center gap-2">📋 รายการจ่ายขึ้นรถ</h2></div>
 
@@ -385,27 +400,31 @@ export default function TruckLoadingPage() {
         </div>
 
       ) : activeTab === 'return' ? (
-        /* 🌟 === RETURN / SETTLEMENT TAB === */
+        /* 🌟 === RETURN / SETTLEMENT TAB (รวมทุกกะ + กระสอบเปล่า/ค้าง) === */
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
           
-          {/* ซ้าย: เลือกรถที่กลับมา */}
+          {/* ซ้าย: เลือกรถที่กลับมา (รวมยอดทุกกะ) */}
           <div className="w-full md:w-[350px] bg-white border-r border-slate-200 shadow-sm flex flex-col h-full shrink-0">
             <div className="p-5 border-b border-slate-100 bg-slate-50"><h2 className="font-black text-slate-900 text-base">🚛 เลือกรถที่กลับมาส่งยอด</h2></div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {isLoadingPending ? (<p className="text-center text-slate-400 font-bold mt-10">⏳ กำลังโหลดข้อมูล...</p>) 
-              : pendingRoutes.length === 0 ? (<p className="text-center text-slate-400 font-bold mt-10">✅ ไม่มีรถค้างส่งยอด</p>) 
-              : pendingRoutes.map(record => (
-                <button key={record.id} onClick={() => handleSelectPendingRoute(record)} className={`w-full text-left p-4 rounded-2xl border-2 transition-all shadow-sm ${selectedPendingId === record.id ? 'bg-blue-50 border-blue-500 ring-4 ring-blue-500/20' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
-                  <p className="font-black text-slate-800 text-sm mb-1">{record.routeName}</p>
-                  <p className="font-bold text-slate-500 text-xs flex justify-between"><span>รอบ: {record.details?.shift}</span><span>บิล: {record.id.slice(-6)}</span></p>
+              : pendingGroups.length === 0 ? (<p className="text-center text-slate-400 font-bold mt-10">✅ ไม่มีรถค้างส่งยอด</p>) 
+              : pendingGroups.map(group => (
+                <button key={group.routeName} onClick={() => handleSelectRouteGroup(group)} className={`w-full text-left p-4 rounded-2xl border-2 transition-all shadow-sm ${selectedRouteKey === group.routeName ? 'bg-blue-50 border-blue-500 ring-4 ring-blue-500/20' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
+                  <p className="font-black text-slate-800 text-sm mb-1">{group.routeName}</p>
+                  <div className="text-[11px] font-bold text-slate-500 space-y-0.5 mt-2 pt-2 border-t border-slate-100">
+                    {group.records.map((rec: any, idx: number) => (
+                      <p key={idx} className="flex justify-between"><span>รอบ: {rec.details?.shift}</span><span className="text-blue-600">บิล: {rec.id.slice(-6)}</span></p>
+                    ))}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* ขวา: ฟอร์มเคลียร์ยอด */}
+          {/* ขวา: ฟอร์มเคลียร์ยอด (รวมทุกกะ + ช่องคืนกระสอบ) */}
           <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden">
-            {!selectedPendingId ? (
+            {!selectedRouteKey ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-6xl">📝</span><p className="font-bold text-lg">เลือกรถจากเมนูด้านซ้ายเพื่อเริ่มเคลียร์ยอด</p></div>
             ) : (
               <div className="flex-1 overflow-y-auto p-4 md:p-8">
@@ -413,8 +432,8 @@ export default function TruckLoadingPage() {
                   
                   {/* หัวบิล */}
                   <div className="p-6 border-b border-slate-200 bg-white">
-                    <h2 className="text-xl font-black text-slate-800 mb-2">ตรวจสอบสินค้าเหลือกลับ & เคลียร์ยอดเงิน</h2>
-                    <p className="text-sm font-bold text-slate-500">สายรถ: <span className="text-blue-600">{pendingRoutes.find(r => r.id === selectedPendingId)?.routeName}</span> | คนขับ: <span className="text-blue-600">{pendingRoutes.find(r => r.id === selectedPendingId)?.driverName}</span></p>
+                    <h2 className="text-xl font-black text-slate-800 mb-2">ตรวจสอบสินค้าเหลือกลับ & เคลียร์ยอด (รวมทุกกะ)</h2>
+                    <p className="text-sm font-bold text-slate-500">สายรถ: <span className="text-blue-600">{selectedRouteKey}</span></p>
                   </div>
 
                   {/* ตารางสินค้า */}
@@ -423,7 +442,7 @@ export default function TruckLoadingPage() {
                       <thead className="bg-slate-100 border-b-2 border-slate-200 text-slate-600 text-xs">
                         <tr>
                           <th className="p-4 font-bold">สินค้า</th>
-                          <th className="p-4 font-black text-center w-24">เบิกไป</th>
+                          <th className="p-4 font-black text-center w-24">เบิกไป (รวม)</th>
                           <th className="p-4 font-bold text-center w-32 text-orange-600">คืน (ดี)</th>
                           <th className="p-4 font-bold text-center w-32 text-rose-600">เสีย/ละลาย</th>
                           <th className="p-4 font-black text-right w-24 text-emerald-600">ขายได้</th>
@@ -437,8 +456,8 @@ export default function TruckLoadingPage() {
                             <tr key={idx} className="hover:bg-slate-50">
                               <td className="p-4 font-bold text-slate-700 text-sm">{item.name}</td>
                               <td className="p-4 font-black text-center text-lg">{item.loadedQty}</td>
-                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.returnedQty || ''} onChange={e => updateReturnQty(item.productId || item.id, 'returnedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-orange-200 focus:border-orange-500 rounded-xl py-2 font-black text-orange-700 outline-none" /></td>
-                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.damagedQty || ''} onChange={e => updateReturnQty(item.productId || item.id, 'damagedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-rose-200 focus:border-rose-500 rounded-xl py-2 font-black text-rose-700 outline-none" /></td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.returnedQty || ''} onChange={e => updateReturnQty(item.productId, 'returnedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-orange-200 focus:border-orange-500 rounded-xl py-2 font-black text-orange-700 outline-none" /></td>
+                              <td className="p-3"><input type="number" min="0" max={item.loadedQty} value={item.damagedQty || ''} onChange={e => updateReturnQty(item.productId, 'damagedQty', e.target.value)} placeholder="0" className="w-full text-center border-2 border-rose-200 focus:border-rose-500 rounded-xl py-2 font-black text-rose-700 outline-none" /></td>
                               <td className="p-4 font-black text-right text-lg text-emerald-600">{soldQty}</td>
                               <td className="p-4 font-black text-right text-slate-800">{(soldQty * item.price).toLocaleString()}</td>
                             </tr>
@@ -448,37 +467,35 @@ export default function TruckLoadingPage() {
                     </table>
                   </div>
 
-                  {/* สรุปยอดเงิน */}
-                  <div className="p-6 bg-slate-50 border-t-2 border-slate-200">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                      {/* กรอกเงิน */}
-                      <div className="space-y-4">
-                        <h3 className="font-black text-slate-700 mb-3">💰 รายละเอียดการส่งเงิน</h3>
-                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">เงินสด:</span><input type="number" value={settleForm.cash} onChange={e => setSettleForm({...settleForm, cash: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
-                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">โอนสแกน:</span><input type="number" value={settleForm.transfer} onChange={e => setSettleForm({...settleForm, transfer: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
-                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">บิลเครดิต:</span><input type="number" value={settleForm.credit} onChange={e => setSettleForm({...settleForm, credit: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-black text-lg focus:border-blue-500 outline-none" placeholder="0" /></div>
-                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-rose-500 text-right">ค่าใช้จ่าย:</span><input type="number" value={settleForm.expense} onChange={e => setSettleForm({...settleForm, expense: e.target.value})} className="flex-1 border border-rose-300 rounded-xl p-3 font-black text-lg focus:border-rose-500 outline-none text-rose-600" placeholder="ค่าน้ำมัน, เบี้ยเลี้ยง" /></div>
-                        <div className="flex items-center gap-3"><span className="w-24 font-bold text-slate-600 text-right">หมายเหตุ:</span><input type="text" value={settleForm.note} onChange={e => setSettleForm({...settleForm, note: e.target.value})} className="flex-1 border border-slate-300 rounded-xl p-3 font-bold text-sm focus:border-blue-500 outline-none" placeholder="รายละเอียดเพิ่มเติม..." /></div>
+                  {/* 🌟 เพิ่มส่วนรับคืนกระสอบเปล่า & กระสอบค้าง */}
+                  <div className="p-6 bg-slate-50 border-t-2 border-slate-200 space-y-6">
+                    <h3 className="font-black text-slate-700">📦 การจัดการกระสอบเปล่า / กระสอบค้าง</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-600">คืนกระสอบเปล่า (ใบ)</label>
+                        <input type="number" min="0" value={bagForm.returnedEmptyBags} onChange={e => setBagForm({...bagForm, returnedEmptyBags: e.target.value})} placeholder="0" className="w-full border border-slate-300 rounded-xl p-3 font-black text-lg bg-white outline-none focus:border-blue-500" />
                       </div>
-                      
-                      {/* สรุปส่วนต่าง */}
-                      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-inner flex flex-col justify-center">
-                        <div className="flex justify-between items-center mb-3 border-b border-dashed border-slate-300 pb-3"><span className="font-bold text-slate-500 text-base">ยอดขายที่ต้องส่ง</span><span className="font-black text-2xl text-slate-800">{totalCalculatedSales.toLocaleString()} บ.</span></div>
-                        <div className="flex justify-between items-center mb-5"><span className="font-bold text-slate-500 text-base">ยอดเงินรวมที่รับมา</span><span className="font-black text-2xl text-emerald-600">{totalReceived.toLocaleString()} บ.</span></div>
-                        
-                        <div className={`p-4 rounded-xl text-center border-2 ${diffSettlement === 0 ? 'bg-emerald-50 border-emerald-200' : diffSettlement > 0 ? 'bg-blue-50 border-blue-200' : 'bg-rose-50 border-rose-200'}`}>
-                          <p className={`font-bold text-xs mb-1 ${diffSettlement === 0 ? 'text-emerald-700' : diffSettlement > 0 ? 'text-blue-700' : 'text-rose-700'}`}>ส่วนต่าง (เงินขาด / เกิน)</p>
-                          <p className={`font-black text-3xl ${diffSettlement === 0 ? 'text-emerald-600' : diffSettlement > 0 ? 'text-blue-600' : 'text-rose-600'}`}>
-                            {diffSettlement === 0 ? 'พอดีเป๊ะ' : diffSettlement > 0 ? `เกิน +${diffSettlement.toLocaleString()}` : `ขาด ${diffSettlement.toLocaleString()}`}
-                          </p>
-                        </div>
-
-                        <button onClick={submitSettlement} className="w-full mt-6 bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-lg flex items-center justify-center gap-2">
-                          💾 บันทึกรับเงิน & คืนสต๊อก
-                        </button>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-600">กระสอบค้าง/ค้างส่งที่ลูกค้า (ใบ)</label>
+                        <input type="number" min="0" value={bagForm.pendingBags} onChange={e => setBagForm({...bagForm, pendingBags: e.target.value})} placeholder="0" className="w-full border border-slate-300 rounded-xl p-3 font-black text-lg bg-white outline-none focus:border-blue-500" />
                       </div>
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-600">หมายเหตุเพิ่มเติม</label>
+                      <input type="text" value={bagForm.note} onChange={e => setBagForm({...bagForm, note: e.target.value})} placeholder="ระบุรายละเอียดเพิ่มเติม..." className="w-full border border-slate-300 rounded-xl p-3 font-bold text-sm bg-white outline-none focus:border-blue-500" />
+                    </div>
+
+                    <div className="flex flex-col md:flex-row justify-between items-center bg-white p-6 rounded-2xl border border-slate-200 shadow-sm gap-4">
+                      <div>
+                        <p className="text-xs font-bold text-slate-400">ยอดขายรวมสุทธิ (ทุกกะ)</p>
+                        <p className="text-4xl font-black text-blue-600">{totalCalculatedSales.toLocaleString()} <span className="text-sm font-bold text-slate-600">บาท</span></p>
+                      </div>
+                      <button onClick={submitSettlement} className="w-full md:w-auto bg-slate-900 hover:bg-black text-white font-black py-4 px-8 rounded-xl shadow-lg transition-transform active:scale-95 text-base flex items-center justify-center gap-2">
+                        💾 บันทึกรับคืนสินค้า & กระสอบเข้าคลัง
+                      </button>
+                    </div>
                   </div>
+
                 </div>
               </div>
             )}

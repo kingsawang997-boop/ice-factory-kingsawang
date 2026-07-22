@@ -129,7 +129,7 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-8 text-center">
-          <p className="text-slate-400 text-xs">พัฒนาระบบโดย <span className="text-white font-bold">นายโค้งดอทคอม</span></p>
+          <p className="text-slate-400 text-xs">พัฒนาระบบโดย <span className="text-white font-bold">นายโต้งดอทคอม</span></p>
         </div>
       </div>
     </div>
