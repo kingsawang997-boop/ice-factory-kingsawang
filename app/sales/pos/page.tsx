@@ -66,44 +66,102 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันขั้นเทพ: ปิดโหมดจีน + เตะลิ้นชัก + แปลงฟอนต์ไทย (CP874)
-  const getRawBTUrl = (text: string) => {
-    // 1. ชุดคำสั่งภาษาเครื่อง (ESC/POS Commands)
-    const initBytes = [
-      27, 64,       // ESC @ : รีเซ็ตเครื่องปริ้น ล้างค่าเก่าที่ค้างอยู่
-      28, 46,       // FS .  : 🌟 คำสั่งปิดโหมดภาษาจีน (สำคัญที่สุด)
-      27, 116, 21,  // ESC t 21 : บังคับเปลี่ยน Code Page เป็นภาษาไทย (CP874)
-      27, 112, 0, 60, 255 // ESC p : สั่งเตะลิ้นชักเก็บเงิน
-    ];
+  // ==========================================
+  // 🌟 สุดยอดเครื่องมือแปลงภาพเป็นใบเสร็จ (Graphic Mode)
+  // ==========================================
+  const getEscPosImageBytes = (canvas: HTMLCanvasElement) => {
+    const widthBytes = Math.ceil(canvas.width / 8);
+    const height = canvas.height;
+    const imgData = canvas.getContext('2d')?.getImageData(0, 0, canvas.width, height).data;
+    if (!imgData) return new Uint8Array();
     
-    // 2. แปลงข้อความภาษาไทยให้เป็นรหัสที่เครื่องปริ้นสลิปเข้าใจ (CP874)
-    const textBytes = [];
-    for (let i = 0; i < text.length; i++) {
-      const charCode = text.charCodeAt(i);
-      
-      if (charCode >= 0x0E00 && charCode <= 0x0E7F) {
-        // ถ้าเป็นอักษรภาษาไทย
-        textBytes.push(charCode - 0x0E00 + 0xA0);
-      } else if (charCode < 128) {
-        // ถ้าเป็นภาษาอังกฤษ ตัวเลข หรือเว้นวรรค
-        textBytes.push(charCode);
-      } else {
-        // ตัวอักษรแปลกๆ ที่อ่านไม่ได้ ให้แทนด้วย '?'
-        textBytes.push(63); 
+    const buffer = new Uint8Array(8 + (widthBytes * height));
+    // คำสั่งพิมพ์ภาพแบบ Raster (GS v 0)
+    buffer.set([29, 118, 48, 0, widthBytes & 0xFF, (widthBytes >> 8) & 0xFF, height & 0xFF, (height >> 8) & 0xFF], 0);
+    
+    let offset = 8;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < widthBytes; x++) {
+        let byte = 0;
+        for (let bit = 0; bit < 8; bit++) {
+          const px = (x * 8) + bit;
+          if (px < canvas.width) {
+            const idx = (y * canvas.width + px) * 4;
+            // เช็คความเข้มของเม็ดสี (ดำ = 1, ขาว = 0)
+            if (imgData[idx + 3] > 128 && (imgData[idx] + imgData[idx + 1] + imgData[idx + 2]) / 3 < 128) {
+              byte |= (1 << (7 - bit));
+            }
+          }
+        }
+        buffer[offset++] = byte;
       }
     }
-    
-    // 3. เอาชุดคำสั่ง (ข้อ 1) มาต่อกับ ข้อความใบเสร็จ (ข้อ 2)
-    const combined = new Uint8Array([...initBytes, ...textBytes]);
-    
-    // 4. แปลงเป็น Base64 ส่งยิงตรงทะลุแอป RawBT
-    let binaryString = '';
-    for (let i = 0; i < combined.length; i++) {
-      binaryString += String.fromCharCode(combined[i]);
-    }
-    
-    return `rawbt:base64,${btoa(binaryString)}`;
+    return buffer;
   }
+
+  const sendToRawBT = (imageBuffer: Uint8Array) => {
+    // คำสั่งเตะลิ้นชัก (ESC p 0 60 255)
+    const kickDrawer = [27, 112, 0, 60, 255]; 
+    // คำสั่งป้อนกระดาษ 3 บรรทัด (LF)
+    const feedLines = [10, 10, 10];
+    
+    const payload = new Uint8Array([...kickDrawer, ...imageBuffer, ...feedLines]);
+    
+    let binaryString = '';
+    for (let i = 0; i < payload.length; i++) {
+      binaryString += String.fromCharCode(payload[i]);
+    }
+    window.location.href = `rawbt:base64,${btoa(binaryString)}`;
+  }
+
+  // วาดสลิปขาย
+  const drawReceiptAndPrint = (billNo: string, dateStr: string, cashier: string, cartItems: any[], total: number, received: number, changeAmount: number) => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    canvas.width = 384; // 58mm กว้างสุดคือ 384 จุด
+    canvas.height = 500 + (cartItems.length * 60);
+
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#000000'; ctx.textBaseline = 'top';
+
+    let y = 10;
+    ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('คิงส์สว่าง โรงงานน้ำแข็ง', 192, y); y += 40;
+    ctx.font = '22px sans-serif'; ctx.fillText('ใบเสร็จรับเงินอย่างย่อ', 192, y); y += 40;
+    
+    ctx.textAlign = 'left'; ctx.font = '20px sans-serif';
+    ctx.fillText(`เลขที่: ${billNo}`, 10, y); y += 30;
+    ctx.fillText(`วันที่: ${dateStr}`, 10, y); y += 30;
+    ctx.fillText(`พนักงาน: ${cashier}`, 10, y); y += 30;
+
+    // เส้นประ
+    ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(10, y); ctx.lineTo(374, y); ctx.stroke(); ctx.setLineDash([]); y += 15;
+
+    cartItems.forEach(item => {
+      ctx.fillText(item.name, 10, y); y += 25;
+      ctx.fillText(`x${item.qty}`, 30, y);
+      ctx.textAlign = 'right'; ctx.fillText(`${(item.price * item.qty).toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left';
+      y += 30;
+    });
+
+    ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(10, y); ctx.lineTo(374, y); ctx.stroke(); ctx.setLineDash([]); y += 15;
+
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('ยอดสุทธิ:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${total.toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 35;
+    ctx.fillText('รับเงินสด:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${received.toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 35;
+    ctx.fillText('เงินทอน:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${changeAmount.toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 45;
+
+    ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('ขอบคุณที่ใช้บริการครับ 🙏', 192, y); y += 40;
+
+    // ครอปภาพส่วนที่ไม่ได้ใช้
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = 384; finalCanvas.height = y;
+    finalCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
+
+    sendToRawBT(getEscPosImageBytes(finalCanvas));
+  }
+  // ==========================================
 
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
@@ -137,26 +195,9 @@ export default function POSPage() {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
-      const textToPrint = `
-คิงส์สว่าง โรงงานน้ำแข็ง
-ใบเสร็จรับเงินอย่างย่อ
---------------------------------
-เลขที่บิล: ${billNo}
-วันที่: ${printDateStr}
-พนักงาน: ${cashierName}
---------------------------------
-${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price * item.qty).toLocaleString()} บ.`).join('\n')}
---------------------------------
-ยอดสุทธิ:     ${totalAmount.toLocaleString()} บ.
-รับเงินสด:     ${actualReceive.toLocaleString()} บ.
-เงินทอน:      ${finalChange.toLocaleString()} บ.
---------------------------------
-ขอบคุณที่ใช้บริการครับ 🙏
-\n\n\n`;
-
       if (isMobileDevice() && printFormat === '58mm') {
-        // 🌟 ยิง URL Scheme ระดับสูงเข้า RawBT (สั่งเตะลิ้นชัก + พิมพ์ทันที ไม่เด้งแชร์)
-        window.location.href = getRawBTUrl(textToPrint);
+        // 🚀 สั่งพิมพ์เป็นรูปภาพ ลิ้นชักเด้ง ภาษาไทยครบ 100%
+        drawReceiptAndPrint(billNo, printDateStr, cashierName, cart, totalAmount, actualReceive, finalChange);
         setTimeout(() => { clearCart(); fetchActiveProducts(); }, 1000);
       } else {
         const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
@@ -181,8 +222,15 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsVerifyingPin(false); setIsPinModalOpen(false); setPinInput('')
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const textToPrint = `\nเปิดลิ้นชักโดย: ${employeeData.name}\n\n`;
-      window.location.href = getRawBTUrl(textToPrint);
+      const canvas = document.createElement('canvas');
+      canvas.width = 384; canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 384, 80);
+        ctx.fillStyle = '#000000'; ctx.font = '22px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`เปิดลิ้นชักโดย: ${employeeData.name}`, 192, 40);
+        sendToRawBT(getEscPosImageBytes(canvas));
+      }
     } else {
       setPrintReceipt({ isManualKick: true })
       setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
@@ -210,24 +258,42 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsClosingShift(false)
 
     if (isMobileDevice() && printFormat === '58mm') {
-      const textCloseShift = `
-ใบนับเงินปิดกะ
-คิงส์สว่าง (หน้าร้าน POS)
---------------------------------
-พิมพ์: ${printDateStr}
-ผู้ปิดกะ: ${cashierName}
-เลขที่กะ: ${slipId}
---------------------------------
-ยอดสแกนโอน:    ${posTransferToday.toLocaleString()} บ.
-ยอดเงินสดในระบบ: ${posCashToday.toLocaleString()} บ.
---------------------------------
-เงินสดที่นับได้จริง: ${Number(actualPosCash).toLocaleString()} บ.
-ส่วนต่างเก๊ะเงิน:  ${diff === 0 ? 'พอดี' : diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()} บ.
---------------------------------
-ลงชื่อแคชเชียร์ ......................
-\n\n`;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if(ctx) {
+        canvas.width = 384; canvas.height = 500;
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 384, 500);
+        ctx.fillStyle = '#000000'; ctx.textBaseline = 'top';
 
-      window.location.href = getRawBTUrl(textCloseShift);
+        let y = 10;
+        ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('ใบนับเงินปิดกะ', 192, y); y += 40;
+        ctx.font = '22px sans-serif'; ctx.fillText('คิงส์สว่าง (หน้าร้าน POS)', 192, y); y += 40;
+
+        ctx.textAlign = 'left'; ctx.font = '20px sans-serif';
+        ctx.fillText(`พิมพ์: ${printDateStr}`, 10, y); y += 30;
+        ctx.fillText(`ผู้ปิดกะ: ${cashierName}`, 10, y); y += 30;
+        ctx.fillText(`เลขที่กะ: ${slipId}`, 10, y); y += 30;
+        
+        ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(10, y); ctx.lineTo(374, y); ctx.stroke(); ctx.setLineDash([]); y += 15;
+
+        ctx.fillText('ยอดสแกนโอน:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${posTransferToday.toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 30;
+        ctx.fillText('ยอดเงินสดในระบบ:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${posCashToday.toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 30;
+
+        ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.moveTo(10, y); ctx.lineTo(374, y); ctx.stroke(); ctx.setLineDash([]); y += 15;
+
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText('เงินสดที่นับได้จริง:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${Number(actualPosCash).toLocaleString()} บ.`, 374, y); ctx.textAlign = 'left'; y += 35;
+        const diffStr = diff === 0 ? 'พอดี' : diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString();
+        ctx.fillText('ส่วนต่างเก๊ะเงิน:', 10, y); ctx.textAlign = 'right'; ctx.fillText(`${diffStr} บ.`, 374, y); ctx.textAlign = 'left'; y += 50;
+
+        ctx.font = '20px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('ลงชื่อแคชเชียร์ ......................', 192, y); y += 40;
+        
+        const finalCanvas = document.createElement('canvas');
+        finalCanvas.width = 384; finalCanvas.height = y;
+        finalCanvas.getContext('2d')?.drawImage(canvas, 0, 0);
+        
+        sendToRawBT(getEscPosImageBytes(finalCanvas));
+      }
 
       setTimeout(() => {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
