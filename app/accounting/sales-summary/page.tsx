@@ -24,7 +24,7 @@ export default function RouteSettlementPage() {
   const [finance, setFinance] = useState({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
 
-  // 🌟 State สำหรับระบบป๊อปอัปเลือกลูกหนี้ (เพิ่มรายการสินค้า, ยอดเงิน, และเลขที่เอกสาร)
+  // State สำหรับป๊อปอัปเลือกลูกหนี้
   const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
   const [debtorsList, setDebtorsList] = useState<any[]>([])
   const [tempDebtorId, setTempDebtorId] = useState('')
@@ -32,6 +32,9 @@ export default function RouteSettlementPage() {
   const [debtorDocNo, setDebtorDocNo] = useState('')
   const [selectedDebtorId, setSelectedDebtorId] = useState('')
   const [selectedDebtorName, setSelectedDebtorName] = useState('')
+
+  // 🌟 State สำหรับดูรายละเอียดบิลในประวัติ
+  const [selectedDetailRecord, setSelectedDetailRecord] = useState<any>(null)
 
   useEffect(() => {
     const session = localStorage.getItem('kingsawang_session')
@@ -110,27 +113,19 @@ export default function RouteSettlementPage() {
     setIsPullingData(false)
   }
 
-  // จัดการป๊อปอัปเลือกลูกหนี้
   const openDebtorModal = async () => {
     const { data } = await supabase.from('debtors').select('*').order('name')
     if (data) setDebtorsList(data)
     setIsDebtorModalOpen(true)
   }
 
-  const addDebtorItemRow = () => {
-    setDebtorItems([...debtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
-  }
-
+  const addDebtorItemRow = () => setDebtorItems([...debtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
   const updateDebtorItem = (index: number, field: string, value: any) => {
     const newItems = [...debtorItems]
     newItems[index][field] = value
     setDebtorItems(newItems)
   }
-
-  const removeDebtorItemRow = (index: number) => {
-    setDebtorItems(debtorItems.filter((_, idx) => idx !== index))
-  }
-
+  const removeDebtorItemRow = (index: number) => setDebtorItems(debtorItems.filter((_, idx) => idx !== index))
   const totalDebtorCalculatedAmount = debtorItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.price || 0)), 0)
 
   const confirmDebtor = () => {
@@ -184,7 +179,6 @@ export default function RouteSettlementPage() {
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
     
-    // บันทึกหนี้ลงระบบลูกหนี้พร้อมเลขที่เอกสาร
     if (finance.monthlyArrears > 0 && selectedDebtorId) {
       const { data: debtorData } = await supabase.from('debtors').select('total_debt').eq('id', selectedDebtorId).single()
       if (debtorData) {
@@ -201,7 +195,10 @@ export default function RouteSettlementPage() {
       date: reportDate, truck: selectedTruck,
       revenue: { iceSales: iceRevenue, packSales: totalPackRevenue, total: totalRevenue },
       bagTracking: { grossLoad: morningLoad.totalIceBags, netLoad: netIceBags, returnedToStock: iceData.returned, melted: iceData.melted, soldAndService: totalSoldAndServiceBags, customerOwe: iceData.customerOweBags, customerReturnOld: iceData.customerReturnOldBags, expectedReturn: expectedEmptyBags, actualReturn: iceData.returnEmptyBags, lostBagsToDeduct: lostEmptyBags },
-      cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference }
+      cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference },
+      debtorDetails: selectedDebtorId ? { debtorName: selectedDebtorName, docNo: debtorDocNo, items: debtorItems, total: finance.monthlyArrears } : null,
+      iceBreakdown: { sold45: iceData.sold45, sold40: iceData.sold40, sold35: iceData.sold35, service: iceData.service },
+      packBreakdown: { icePacks: icePackSold, water1500: waterSold1500, water600: waterSold600, water350: waterSold350 }
     }
 
     const newSettlement = {
@@ -281,7 +278,6 @@ export default function RouteSettlementPage() {
                   {isPullingData && <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10"></div>}
                   <div className="border-b-2 border-slate-100 pb-2 flex justify-between items-end mb-2"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-blue-500">🧊</span> กระทบยอดกระสอบ</h2><span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider border ${bagDifference === 0 ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200 animate-pulse'}`}>{bagDifference === 0 ? '✓ กระสอบครบ' : bagDifference > 0 ? `⚠️ หาย ${bagDifference} ใบ` : `❓ เกิน ${Math.abs(bagDifference)} ใบ`}</span></div>
                   <div className="space-y-3">
-                    {/* 🌟 เปลี่ยนข้อความตามข้อ 1 */}
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">น้ำแข็งส่งคืนคลัง (กระสอบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} readOnly className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" /></div>
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} readOnly className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none cursor-not-allowed" placeholder="0" /></div>
                     <div className="pt-3 space-y-3 border-t border-slate-100">
@@ -368,6 +364,7 @@ export default function RouteSettlementPage() {
           </>
         )}
 
+        {/* TAB 2: ประวัติ + ฟีเจอร์คลิกดูรายการสินค้า */}
         {activeTab === 'history' && (
           <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row justify-between items-center mb-6 border-b border-slate-100 pb-4 gap-4">
@@ -386,8 +383,14 @@ export default function RouteSettlementPage() {
                   {isLoadingHistory ? (<tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold">⏳ กำลังค้นหาข้อมูล...</td></tr>) : historyRecords.length === 0 ? (<tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold">ไม่มีประวัติการปิดยอดในวันที่ {historyDate}</td></tr>) : (
                     historyRecords.map(record => (
                       <tr key={record.id} className="border-b border-slate-50 hover:bg-slate-50/50">
-                        <td className="p-4"><p className="font-bold text-slate-800">{new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</p><p className="text-[10px] text-slate-400 mt-1">{record.id}</p></td>
-                        <td className="p-4 font-black text-blue-700">{record.routeName}</td>
+                        <td className="p-4">
+                          {/* 🌟 คลิกที่เลขที่บิลเพื่อดูรายละเอียดสินค้า */}
+                          <button onClick={() => setSelectedDetailRecord(record)} className="font-bold text-blue-600 hover:underline text-left">
+                            {new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+                          </button>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{record.id}</p>
+                        </td>
+                        <td className="p-4 font-black text-slate-800">{record.routeName}</td>
                         <td className="p-4 text-right font-bold text-slate-700">{Number(record.expectedAmount).toLocaleString()} บ.</td>
                         <td className="p-4 text-center">{record.details?.bagTracking?.lostBagsToDeduct > 0 ? <span className="text-rose-600 font-black bg-rose-50 px-2 py-1 rounded">{record.details.bagTracking.lostBagsToDeduct}</span> : <span className="text-emerald-500 font-bold">-</span>}</td>
                         <td className="p-4 text-right font-black text-emerald-600">{Number(record.cashAmount).toLocaleString()} บ.</td>
@@ -402,7 +405,76 @@ export default function RouteSettlementPage() {
         )}
       </div>
 
-      {/* 🌟 ป๊อปอัป Modal เลือกลูกหนี้แบบสมบูรณ์ตามข้อ 2 */}
+      {/* 🌟 ป๊อปอัป Modal แสดงรายละเอียดรายการสินค้าเมื่อคลิกดูประวัติ */}
+      {selectedDetailRecord && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-black text-lg text-slate-800">📦 รายละเอียดการปิดยอด: {selectedDetailRecord.id}</h3>
+                <p className="text-xs font-bold text-slate-500 mt-0.5">สายส่ง: {selectedDetailRecord.routeName} | วันที่: {selectedDetailRecord.date}</p>
+              </div>
+              <button onClick={() => setSelectedDetailRecord(null)} className="text-slate-400 hover:text-rose-500 font-bold bg-white w-8 h-8 rounded-full shadow-sm">✕</button>
+            </div>
+            <div className="p-6 space-y-4 text-sm max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+                <div><span className="text-slate-500 font-bold">ยอดขายรวม:</span> <span className="font-black text-slate-800 text-base">{Number(selectedDetailRecord.expectedAmount).toLocaleString()} บาท</span></div>
+                <div><span className="text-slate-500 font-bold">เงินสดรับจริง:</span> <span className="font-black text-emerald-600 text-base">{Number(selectedDetailRecord.cashAmount).toLocaleString()} บาท</span></div>
+              </div>
+
+              <h4 className="font-black text-slate-700 text-xs uppercase tracking-wider">🧊 รายการน้ำแข็งที่ขายได้</h4>
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr><th className="p-3 font-bold">เรทราคา</th><th className="p-3 font-bold text-center">จำนวน (กระสอบ)</th><th className="p-3 font-bold text-right">รวมเงิน</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {selectedDetailRecord.details?.iceBreakdown ? (
+                      <>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice1}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold45}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold45 * adminSettings.icePrice1).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice2}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold40}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold40 * adminSettings.icePrice2).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice3}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold35}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold35 * adminSettings.icePrice3).toLocaleString()} บ.</td></tr>
+                      </>
+                    ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+
+              <h4 className="font-black text-slate-700 text-xs uppercase tracking-wider pt-2">📦 รายการสินค้าแพ็คที่ขายได้</h4>
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr><th className="p-3 font-bold">สินค้าแพ็ค</th><th className="p-3 font-bold text-center">จำนวนขาย</th><th className="p-3 font-bold text-right">รวมเงิน</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {selectedDetailRecord.details?.packBreakdown ? (
+                      <>
+                        <tr><td className="p-3">น้ำแข็งแพ็ค</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.icePacks}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.icePacks * adminSettings.icePackPrice).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 1500 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water1500}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water1500 * adminSettings.waterPrice1500).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 600 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water600}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water600 * adminSettings.waterPrice600).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 350 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water350}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water350 * adminSettings.waterPrice350).toLocaleString()} บ.</td></tr>
+                      </>
+                    ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedDetailRecord.details?.debtorDetails && (
+                <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-xs space-y-1">
+                  <p className="font-black text-rose-800">📌 บันทึกหนี้ค้างรายเดือน:</p>
+                  <p>ลูกหนี้: <span className="font-bold">{selectedDetailRecord.details.debtorDetails.debtorName}</span> (เลขที่เอกสาร: {selectedDetailRecord.details.debtorDetails.docNo})</p>
+                  <p>ยอดเงินหนี้: <span className="font-bold text-rose-600">{selectedDetailRecord.details.debtorDetails.total} บาท</span></p>
+                </div>
+              )}
+            </div>
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button onClick={() => { const rec = selectedDetailRecord; setSelectedDetailRecord(null); handlePrint(rec); }} className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-2.5 rounded-xl shadow">🖨️ พิมพ์เอกสารนี้</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ป๊อปอัป Modal เลือกลูกหนี้แบบสมบูรณ์ */}
       {isDebtorModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
@@ -466,27 +538,115 @@ export default function RouteSettlementPage() {
         </div>
       )}
 
+      {/* 🌟 หน้ากระดาษพิมพ์ข้อมูลทั้งหมดตามข้อ 2 */}
       {printSlip && (
         <div className="hidden print:block text-black font-sans bg-white p-10 max-w-4xl mx-auto min-h-screen">
-          <div className="text-center mb-8 pb-6 border-b-4 border-black"><h1 className="text-3xl font-black mb-2">ใบสรุปยอดสายส่งประจำวัน (Route Settlement)</h1><p className="font-bold text-lg">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p></div>
-          <div className="grid grid-cols-2 gap-4 mb-8 text-base"><div><p><span className="font-bold">วันที่:</span> {printSlip.date}</p><p><span className="font-bold">สายส่ง:</span> {printSlip.routeName}</p></div><div className="text-right"><p><span className="font-bold">เลขที่เอกสาร:</span> {printSlip.id}</p><p><span className="font-bold">พิมพ์เมื่อ:</span> {new Date().toLocaleString('th-TH')}</p></div></div>
-          <table className="w-full border-collapse border-2 border-black text-sm mb-6">
-            <thead><tr className="bg-gray-200 border-b-2 border-black"><th className="border-r border-black py-2 px-3 text-left">รายการ (Description)</th><th className="py-2 px-3 text-right w-40">จำนวนเงิน (Amount)</th></tr></thead>
+          <div className="text-center mb-6 pb-4 border-b-4 border-black">
+            <h1 className="text-2xl font-black mb-1">ใบสรุปยอดสายส่งประจำวัน (Route Settlement)</h1>
+            <p className="font-bold text-base">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4 mb-6 text-sm">
+            <div><p><span className="font-bold">วันที่:</span> {printSlip.date}</p><p><span className="font-bold">สายส่ง:</span> {printSlip.routeName}</p></div>
+            <div className="text-right"><p><span className="font-bold">เลขที่เอกสาร:</span> {printSlip.id}</p><p><span className="font-bold">พิมพ์เมื่อ:</span> {new Date().toLocaleString('th-TH')}</p></div>
+          </div>
+
+          <table className="w-full border-collapse border-2 border-black text-xs mb-4">
+            <thead>
+              <tr className="bg-gray-200 border-b-2 border-black">
+                <th className="border-r border-black py-2 px-3 text-left">รายการสินค้า (Description)</th>
+                <th className="border-r border-black py-2 px-3 text-center w-24">จำนวนขาย</th>
+                <th className="py-2 px-3 text-right w-32">จำนวนเงิน (บาท)</th>
+              </tr>
+            </thead>
             <tbody>
-              <tr className="bg-gray-100"><td colSpan={2} className="p-2 font-bold border-b border-black text-center">-- หมวดรายรับจากการขาย --</td></tr>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-2 pl-6">ยอดขายกระสอบ/น้ำแข็ง</td><td className="p-2 text-right">{printSlip.details?.revenue?.iceSales?.toLocaleString() || '-'}</td></tr>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-2 pl-6">ยอดขายสินค้าแพ็ค</td><td className="p-2 text-right">{printSlip.details?.revenue?.packSales?.toLocaleString() || '-'}</td></tr>
-              <tr className="border-b-2 border-black"><td className="border-r border-black p-3 font-black text-right">ยอดรวมสุทธิ (Total Sales)</td><td className="p-3 text-right font-black text-lg">{printSlip.expectedAmount.toLocaleString()}</td></tr>
-              <tr className="bg-gray-100"><td colSpan={2} className="p-2 font-bold border-b border-black text-center">-- หมวดหักชำระ / ค้างชำระ --</td></tr>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-2 pl-6">หัก ยอดลูกค้าโอนเข้าบริษัท</td><td className="p-2 text-right">{printSlip.transferAmount.toLocaleString()}</td></tr>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-2 pl-6">หัก จ่ายค้าง/ค้างรายวัน/ค้างเดือน</td><td className="p-2 text-right">{printSlip.creditAmount.toLocaleString()}</td></tr>
-              <tr className="border-b-2 border-black"><td className="border-r border-black p-3 font-black text-right text-emerald-600">ยอดเงินสดที่ต้องนำส่ง (Expected Cash)</td><td className="p-3 text-right font-black text-lg text-emerald-600">{printSlip.details?.cash?.expected?.toLocaleString() || '-'}</td></tr>
-              <tr className="border-b-2 border-black bg-gray-50"><td className="border-r border-black p-4 font-black text-lg text-right">ยอดเงินสดส่งจริง (Actual Cash)</td><td className="p-4 text-right font-black text-2xl underline">{printSlip.cashAmount.toLocaleString()}</td></tr>
-              <tr><td className="border-r border-black p-4 font-black text-right">ส่วนต่างเงินสด (Cash Diff.)</td><td className={`p-4 text-right font-black text-xl ${printSlip.diffAmount === 0 ? '' : 'text-rose-600'}`}>{printSlip.diffAmount === 0 ? 'พอดี (0)' : `${printSlip.diffAmount > 0 ? '+' : ''}${printSlip.diffAmount.toLocaleString()}`}</td></tr>
+              <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black">-- หมวดน้ำแข็ง --</td></tr>
+              {printSlip.details?.iceBreakdown?.sold45 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice1}.-)</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold45} กระสอบ</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold45 * adminSettings.icePrice1).toLocaleString()}</td>
+                </tr>
+              )}
+              {printSlip.details?.iceBreakdown?.sold40 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice2}.-)</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold40} กระสอบ</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold40 * adminSettings.icePrice2).toLocaleString()}</td>
+                </tr>
+              )}
+              {printSlip.details?.iceBreakdown?.sold35 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice3}.-)</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold35} กระสอบ</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold35 * adminSettings.icePrice3).toLocaleString()}</td>
+                </tr>
+              )}
+
+              <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black border-t">-- หมวดสินค้าแพ็ค --</td></tr>
+              {printSlip.details?.packBreakdown?.icePacks > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็งแพ็ค</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.icePacks} แพ็ค</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.icePacks * adminSettings.icePackPrice).toLocaleString()}</td>
+                </tr>
+              )}
+              {printSlip.details?.packBreakdown?.water1500 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 1500 ml</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water1500} แพ็ค</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water1500 * adminSettings.waterPrice1500).toLocaleString()}</td>
+                </tr>
+              )}
+              {printSlip.details?.packBreakdown?.water600 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 600 ml</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water600} แพ็ค</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water600 * adminSettings.waterPrice600).toLocaleString()}</td>
+                </tr>
+              )}
+              {printSlip.details?.packBreakdown?.water350 > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 350 ml</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water350} แพ็ค</td>
+                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water350 * adminSettings.waterPrice350).toLocaleString()}</td>
+                </tr>
+              )}
+
+              <tr className="border-t-2 border-black bg-gray-50 font-black">
+                <td colSpan={2} className="border-r border-black p-2 text-right">ยอดรวมสุทธิ (Total Sales)</td>
+                <td className="p-2 text-right text-sm">{printSlip.expectedAmount.toLocaleString()} บาท</td>
+              </tr>
             </tbody>
           </table>
-          <div className="border-2 border-black p-4 text-center mt-6"><p className="font-bold text-lg mb-2 underline">สรุปประเมินถุงเปล่า/ถุงหาย (Bag Tracking)</p><p className="text-base">จำนวนถุงหายที่ต้องหักเงิน: <span className="font-black text-2xl ml-2">{printSlip.details?.bagTracking?.lostBagsToDeduct || 0}</span> ใบ</p></div>
-          <div className="grid grid-cols-2 gap-8 text-center mt-24 text-sm"><div><div className="border-b border-black mx-12 h-10 mb-2"></div><p className="font-bold">พนักงานขับรถ / ผู้ส่งเงิน</p></div><div><div className="border-b border-black mx-12 h-10 mb-2"></div><p className="font-bold">พนักงานบัญชี / ผู้รับเงิน</p></div></div>
+
+          {/* สรุปการรับเงินสด */}
+          <table className="w-full border-collapse border-2 border-black text-xs mb-4">
+            <thead><tr className="bg-gray-200 border-b-2 border-black"><th className="border-r border-black py-1.5 px-3 text-left">การรับเงิน & ชำระเงิน</th><th className="py-1.5 px-3 text-right w-40">จำนวนเงิน</th></tr></thead>
+            <tbody>
+              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">โอนเข้าบริษัท</td><td className="p-1.5 text-right">{printSlip.transferAmount.toLocaleString()}</td></tr>
+              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">จ่ายค้างหนี้เก่า / ค้างรายวัน</td><td className="p-1.5 text-right">{printSlip.creditAmount.toLocaleString()}</td></tr>
+              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">ยอดเงินสดที่ต้องนำส่ง (Expected Cash)</td><td className="p-1.5 text-right font-bold">{printSlip.details?.cash?.expected?.toLocaleString()}</td></tr>
+              <tr className="border-b-2 border-black bg-gray-50 font-black"><td className="border-r border-black p-2 text-right">ยอดเงินสดส่งจริง (Actual Cash)</td><td className="p-2 text-right text-sm">{printSlip.cashAmount.toLocaleString()}</td></tr>
+              <tr><td className="border-r border-black p-2 text-right">ส่วนต่างเงินสด (Diff.)</td><td className="p-2 text-right font-bold">{printSlip.diffAmount === 0 ? 'พอดี (0)' : printSlip.diffAmount.toLocaleString()}</td></tr>
+            </tbody>
+          </table>
+
+          {printSlip.details?.debtorDetails && (
+            <div className="border border-black p-2 mb-4 text-xs">
+              <p className="font-bold underline">รายละเอียดหนี้ค้างรายเดือน:</p>
+              <p>ลูกหนี้: {printSlip.details.debtorDetails.debtorName} | เอกสาร: {printSlip.details.debtorDetails.docNo} | ยอดหนี้: {printSlip.details.debtorDetails.total} บาท</p>
+            </div>
+          )}
+
+          <div className="border border-black p-2 text-center text-xs mb-10">
+            <p className="font-bold">สรุปถุงเปล่า/ถุงหาย: ถุงหายที่ต้องหักเงิน: <span className="font-black text-sm">{printSlip.details?.bagTracking?.lostBagsToDeduct || 0}</span> ใบ</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-8 text-center text-xs">
+            <div><div className="border-b border-black mx-10 h-8 mb-1"></div><p className="font-bold">พนักงานขับรถ / ผู้ส่งเงิน</p></div>
+            <div><div className="border-b border-black mx-10 h-8 mb-1"></div><p className="font-bold">พนักงานบัญชี / ผู้รับเงิน</p></div>
+          </div>
         </div>
       )}
     </>
