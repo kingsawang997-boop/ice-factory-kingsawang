@@ -25,7 +25,6 @@ export default function POSPage() {
   const [actualPosCash, setActualPosCash] = useState<number | string>('')
   const [closeShiftSlip, setCloseShiftSlip] = useState<any>(null)
 
-  // 🌟 State สำหรับระบบ PIN เปิดลิ้นชักด้วยมือ
   const [isPinModalOpen, setIsPinModalOpen] = useState(false)
   const [pinInput, setPinInput] = useState('')
   const [isVerifyingPin, setIsVerifyingPin] = useState(false)
@@ -65,10 +64,9 @@ export default function POSPage() {
   const addQuickCash = (amount: number) => setCashReceived(prev => Number(prev || 0) + amount)
   const exactCash = () => setCashReceived(totalAmount)
 
-  // 🚀 ฟังก์ชันเช็คอุปกรณ์ว่าเป็น Mobile/Tablet หรือไม่
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 อัปเกรด: ตัดสต๊อกอัตโนมัติเมื่อกดชำระเงิน + สั่งพิมพ์
+  // 🚀 ฟังก์ชันหลัก: ชำระเงิน + สั่งพิมพ์ตรงเข้า ESC POS
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -80,11 +78,9 @@ export default function POSPage() {
     const currentDate = new Date().toISOString()
     const printDateStr = new Date().toLocaleString('th-TH')
 
-    // 1. บันทึกยอดขาย
     const newSale = { id: billNo, totalAmount, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
     await supabase.from('sales').insert([newSale])
 
-    // 2. วิ่งไปตัดสต๊อกในฐานข้อมูล
     const stockUpdatePromises = cart
       .filter(item => !String(item.id).startsWith('CUSTOM-'))
       .map(item => {
@@ -93,10 +89,8 @@ export default function POSPage() {
         const newStock = currentStock - item.qty
         return supabase.from('products').update({ stock: newStock }).eq('id', item.id)
       })
-    
     await Promise.all(stockUpdatePromises)
 
-    // 3. จัดการเรื่องพิมพ์บิลและลิ้นชัก
     const logId = `LOG-${Date.now()}`
     
     if (isFreeBill || paymentMethod === 'transfer') {
@@ -108,46 +102,40 @@ export default function POSPage() {
       await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
-      if (isMobileDevice() && navigator.share && printFormat === '58mm') {
-        // 🌟 ยิงข้อความดิบเข้าแอป RawBT สำหรับ Tablet Android
-        const textToPrint = `
-คิงส์สว่าง
+      const textToPrint = `
+คิงส์สว่าง โรงงานน้ำแข็ง
 ใบเสร็จรับเงินอย่างย่อ
 --------------------------------
-เลขที่: ${billNo}
+เลขที่บิล: ${billNo}
 วันที่: ${printDateStr}
-แคชเชียร์: ${cashierName}
+พนักงาน: ${cashierName}
 --------------------------------
 ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price * item.qty).toLocaleString()} บ.`).join('\n')}
 --------------------------------
 ยอดสุทธิ:     ${totalAmount.toLocaleString()} บ.
-รับเงิน:      ${actualReceive.toLocaleString()} บ.
+รับเงินสด:     ${actualReceive.toLocaleString()} บ.
 เงินทอน:      ${finalChange.toLocaleString()} บ.
 --------------------------------
-ขอบคุณที่ใช้บริการครับ
-`;
-        navigator.share({ text: textToPrint }).then(() => {
-          clearCart(); fetchActiveProducts()
-        }).catch(() => {
-          clearCart(); fetchActiveProducts()
-        })
+ขอบคุณที่ใช้บริการครับ 🙏
+\n\n`;
+
+      if (isMobileDevice() && printFormat === '58mm') {
+        // 🌟 ยิง Android Intent ตรงเข้าแอป ESC POS (ไม่ต้องมีเมนู Share กวนใจ)
+        const encodedText = encodeURIComponent(textToPrint);
+        const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodedText};package=com.loopedlabs.escposprintservice;end`;
+        
+        window.location.href = intentUrl;
+        setTimeout(() => { clearCart(); fetchActiveProducts(); }, 800);
       } else {
-        // 🌟 พิมพ์ผ่านเบราว์เซอร์ปกติสำหรับ PC
+        // 💻 สำหรับ PC
         const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
         setPrintReceipt(receiptData)
-        setTimeout(() => { 
-          window.print(); 
-          setTimeout(() => { 
-            setPrintReceipt(null); 
-            clearCart(); 
-            fetchActiveProducts()
-          }, 1000) 
-        }, 1000)
+        setTimeout(() => { window.print(); setTimeout(() => { setPrintReceipt(null); clearCart(); fetchActiveProducts() }, 1000) }, 1000)
       }
     }
   }
 
-  // 🌟 ฟังก์ชันตรวจสอบรหัส PIN ก่อนเตะลิ้นชักด้วยมือ
+  // 🌟 เตะลิ้นชักด้วยมือ (ยิงตรงเข้า ESC POS)
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
@@ -161,7 +149,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
       .single()
 
     if (error || !employeeData) {
-      alert('❌ รหัสพนักงานไม่ถูกต้อง หรือพนักงานไม่มีสิทธิ์ใช้งาน')
+      alert('❌ รหัสพนักงานไม่ถูกต้อง')
       setIsVerifyingPin(false)
       setPinInput('')
       return
@@ -179,9 +167,9 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsPinModalOpen(false)
     setPinInput('')
 
-    if (isMobileDevice() && navigator.share) {
-      // เตะลิ้นชักแอป RawBT ด้วยการส่งจุดไข่ปลา
-      navigator.share({ text: "." }).catch(()=>console.log('Cancelled'))
+    if (isMobileDevice() && printFormat === '58mm') {
+      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent('.')};package=com.loopedlabs.escposprintservice;end`;
+      window.location.href = intentUrl;
     } else {
       setPrintReceipt({ isManualKick: true })
       setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
@@ -197,6 +185,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setPosCashToday(cCash); setPosTransferToday(cTransfer)
   }
 
+  // 🌟 ปิดกะส่งยอด (ยิงตรงเข้า ESC POS)
   const submitCloseShift = async () => {
     if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้')
     const diff = Number(actualPosCash) - posCashToday
@@ -214,48 +203,40 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     const printDateStr = new Date().toLocaleString('th-TH')
     setIsClosingShift(false)
 
-    if (isMobileDevice() && navigator.share && printFormat === '58mm') {
-      const textToPrint = `
+    if (isMobileDevice() && printFormat === '58mm') {
+      const textCloseShift = `
 ใบนับเงินปิดกะ
 คิงส์สว่าง (หน้าร้าน POS)
 --------------------------------
 พิมพ์: ${printDateStr}
 ผู้ปิดกะ: ${cashierName}
-เลขที่: ${slipId}
+เลขที่กะ: ${slipId}
 --------------------------------
-ยอดสแกนโอน:    ${posTransferToday.toLocaleString()}
-ยอดเงินสดในระบบ: ${posCashToday.toLocaleString()}
+ยอดสแกนโอน:    ${posTransferToday.toLocaleString()} บ.
+ยอดเงินสดในระบบ: ${posCashToday.toLocaleString()} บ.
 --------------------------------
-เงินสดที่นับได้:   ${Number(actualPosCash).toLocaleString()}
-ส่วนต่าง:       ${diff === 0 ? 'พอดี' : diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()}
+เงินสดที่นับได้จริง: ${Number(actualPosCash).toLocaleString()} บ.
+ส่วนต่างเก๊ะเงิน:  ${diff === 0 ? 'พอดี' : diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()} บ.
 --------------------------------
 ลงชื่อแคชเชียร์ ......................
-`;
-      navigator.share({ text: textToPrint }).then(() => {
-        alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
-        localStorage.removeItem('kingsawang_session')
-        window.location.href = '/login'
-      }).catch(() => {
-        localStorage.removeItem('kingsawang_session')
-        window.location.href = '/login'
-      })
+\n\n`;
+
+      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textCloseShift)};package=com.loopedlabs.escposprintservice;end`;
+      window.location.href = intentUrl;
+      
+      setTimeout(() => {
+        alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
+        localStorage.removeItem('kingsawang_session'); 
+        window.location.href = '/login';
+      }, 1500);
+
     } else {
-      setCloseShiftSlip({ 
-        id: slipId, 
-        date: printDateStr, 
-        cashAmount: posCashToday, 
-        transferAmount: posTransferToday, 
-        actualCash: Number(actualPosCash), 
-        diff, 
-        by: cashierName 
-      })
+      setCloseShiftSlip({ id: slipId, date: printDateStr, cashAmount: posCashToday, transferAmount: posTransferToday, actualCash: Number(actualPosCash), diff, by: cashierName })
       setTimeout(() => { 
         window.print() 
         setTimeout(() => { 
           setCloseShiftSlip(null)
-          alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ')
-          localStorage.removeItem('kingsawang_session')
-          window.location.href = '/login'
+          localStorage.removeItem('kingsawang_session'); window.location.href = '/login'
         }, 1000) 
       }, 1000)
     }
@@ -338,23 +319,8 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
             </div>
             <form onSubmit={submitManualOpenWithPin} className="p-6 space-y-5 text-center">
               <p className="text-xs font-bold text-slate-500">กรุณากรอกรหัสประจำตัวพนักงาน<br/>เพื่อบันทึกประวัติการเปิดลิ้นชัก</p>
-              
-              <input 
-                type="password" 
-                maxLength={6} 
-                required
-                autoFocus
-                value={pinInput} 
-                onChange={(e) => setPinInput(e.target.value)} 
-                className="w-full bg-slate-50 border-2 border-amber-200 px-4 py-4 rounded-xl focus:outline-none focus:border-amber-500 font-black text-3xl text-center text-amber-800 tracking-widest shadow-inner" 
-                placeholder="****" 
-              />
-              
-              <button 
-                type="submit" 
-                disabled={isVerifyingPin || !pinInput}
-                className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-amber-500 hover:bg-amber-600 shadow-amber-500/30 disabled:bg-slate-300"
-              >
+              <input type="password" maxLength={6} required autoFocus value={pinInput} onChange={(e) => setPinInput(e.target.value)} className="w-full bg-slate-50 border-2 border-amber-200 px-4 py-4 rounded-xl focus:outline-none focus:border-amber-500 font-black text-3xl text-center text-amber-800 tracking-widest shadow-inner" placeholder="****" />
+              <button type="submit" disabled={isVerifyingPin || !pinInput} className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-amber-500 hover:bg-amber-600 shadow-amber-500/30 disabled:bg-slate-300">
                 {isVerifyingPin ? '⏳ กำลังตรวจสอบ...' : 'ยืนยันรหัส & เปิดลิ้นชัก'}
               </button>
             </form>
@@ -362,7 +328,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
         </div>
       )}
 
-      {/* 🚀 Modal: หน้าต่างรับชำระเงิน (Checkout) */}
+      {/* 🚀 Modal: หน้าต่างรับชำระเงิน */}
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
@@ -392,14 +358,12 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
                   {paymentMethod === 'cash' && (
                     <div className="space-y-3">
                       <input type="number" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="รับเงินมา..." className="w-full bg-slate-50 border-2 border-slate-200 px-4 py-4 rounded-xl focus:outline-none focus:border-blue-500 font-black text-3xl text-center text-slate-800 shadow-inner" autoFocus />
-                      
                       <div className="grid grid-cols-4 gap-2">
                         <button onClick={exactCash} className="bg-emerald-50 text-emerald-700 hover:bg-emerald-100 py-3 rounded-lg font-black border border-emerald-200 text-sm transition-colors">พอดี</button>
                         {[100, 500, 1000].map(amt => (
                           <button key={amt} onClick={() => addQuickCash(amt)} className="bg-white border border-slate-200 hover:bg-slate-50 py-3 rounded-lg font-black text-slate-700 text-sm transition-colors">+{amt}</button>
                         ))}
                       </div>
-
                       <div className="flex justify-between items-center bg-rose-50 p-5 rounded-xl border border-rose-100">
                         <span className="font-bold text-rose-600 text-sm">เงินทอน:</span>
                         <span className="font-black text-4xl text-rose-600 tracking-tight">{change > 0 ? change.toLocaleString() : '0'}</span>
@@ -437,7 +401,6 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
                   <p className="font-black text-2xl text-emerald-700">{posCashToday.toLocaleString()} บ.</p>
                 </div>
               </div>
-
               <div className="space-y-2">
                 <label className="text-sm font-bold text-slate-700">ระบุเงินสดในลิ้นชักที่นับได้จริง 💵</label>
                 <div className="relative">
@@ -445,7 +408,6 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
                   <button onClick={() => setActualPosCash(posCashToday)} className="absolute right-3 top-1/2 -translate-y-1/2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold px-3 py-2 rounded-xl transition-colors">พอดีเป๊ะ</button>
                 </div>
               </div>
-
               <button onClick={submitCloseShift} className="w-full bg-rose-600 hover:bg-rose-700 text-white font-black py-4 rounded-xl shadow-lg shadow-rose-500/30 transition-all text-lg active:scale-95">
                 🖨️ ยืนยันปิดกะ & พิมพ์สลิป (เตะลิ้นชัก)
               </button>
