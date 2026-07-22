@@ -66,7 +66,7 @@ export default function POSPage() {
 
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
-  // 🚀 ฟังก์ชันหลัก: ชำระเงิน + สั่งพิมพ์ตรงเข้า ESC POS
+  // 🚀 ฟังก์ชันหลัก: ชำระเงิน + สั่งพิมพ์
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -119,13 +119,11 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 ขอบคุณที่ใช้บริการครับ 🙏
 \n\n`;
 
-      if (isMobileDevice() && printFormat === '58mm') {
-        // 🌟 ยิง Android Intent ตรงเข้าแอป ESC POS (ไม่ต้องมีเมนู Share กวนใจ)
-        const encodedText = encodeURIComponent(textToPrint);
-        const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodedText};package=com.loopedlabs.escposprintservice;end`;
-        
-        window.location.href = intentUrl;
-        setTimeout(() => { clearCart(); fetchActiveProducts(); }, 800);
+      if (isMobileDevice() && navigator.share && printFormat === '58mm') {
+        // 🌟 เด้งหน้าต่าง Share ของ Android เพื่อส่งเข้าแอปปริ้นเตอร์
+        navigator.share({ text: textToPrint })
+          .then(() => { clearCart(); fetchActiveProducts(); })
+          .catch(() => { clearCart(); fetchActiveProducts(); });
       } else {
         // 💻 สำหรับ PC
         const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
@@ -135,7 +133,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     }
   }
 
-  // 🌟 เตะลิ้นชักด้วยมือ (ยิงตรงเข้า ESC POS)
+  // 🌟 เตะลิ้นชักด้วยมือ
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
@@ -167,9 +165,9 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setIsPinModalOpen(false)
     setPinInput('')
 
-    if (isMobileDevice() && printFormat === '58mm') {
-      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent('.')};package=com.loopedlabs.escposprintservice;end`;
-      window.location.href = intentUrl;
+    if (isMobileDevice() && navigator.share && printFormat === '58mm') {
+      // เตะลิ้นชักผ่าน Share
+      navigator.share({ text: "." }).catch(()=>console.log('Cancelled'))
     } else {
       setPrintReceipt({ isManualKick: true })
       setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
@@ -185,7 +183,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     setPosCashToday(cCash); setPosTransferToday(cTransfer)
   }
 
-  // 🌟 ปิดกะส่งยอด (ยิงตรงเข้า ESC POS)
+  // 🌟 ปิดกะส่งยอด
   const submitCloseShift = async () => {
     if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้')
     const diff = Number(actualPosCash) - posCashToday
@@ -203,7 +201,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
     const printDateStr = new Date().toLocaleString('th-TH')
     setIsClosingShift(false)
 
-    if (isMobileDevice() && printFormat === '58mm') {
+    if (isMobileDevice() && navigator.share && printFormat === '58mm') {
       const textCloseShift = `
 ใบนับเงินปิดกะ
 คิงส์สว่าง (หน้าร้าน POS)
@@ -221,14 +219,17 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
 ลงชื่อแคชเชียร์ ......................
 \n\n`;
 
-      const intentUrl = `intent:#Intent;action=android.intent.action.SEND;type=text/plain;S.android.intent.extra.TEXT=${encodeURIComponent(textCloseShift)};package=com.loopedlabs.escposprintservice;end`;
-      window.location.href = intentUrl;
-      
-      setTimeout(() => {
-        alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
-        localStorage.removeItem('kingsawang_session'); 
-        window.location.href = '/login';
-      }, 1500);
+      navigator.share({ text: textCloseShift })
+        .then(() => {
+          alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
+          localStorage.removeItem('kingsawang_session'); 
+          window.location.href = '/login';
+        })
+        .catch(() => {
+          alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
+          localStorage.removeItem('kingsawang_session'); 
+          window.location.href = '/login';
+        });
 
     } else {
       setCloseShiftSlip({ id: slipId, date: printDateStr, cashAmount: posCashToday, transferAmount: posTransferToday, actualCash: Number(actualPosCash), diff, by: cashierName })
@@ -416,7 +417,7 @@ ${cart.map(item => `${item.name}\n x${item.qty} ................ ${(item.price *
         </div>
       )}
 
-      {/* 🖨️ โซนแสดงผลการพิมพ์ (Fallback สำหรับบน PC Desktop) */}
+      {/* 🖨️ โซนแสดงผลการพิมพ์ (สล๊อตสำรองสำหรับบน PC) */}
       {closeShiftSlip ? (
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
       ) : printReceipt && !printReceipt.isManualKick && (
