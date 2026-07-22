@@ -9,6 +9,17 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'คิงส์สว่าง Mini ERP - ระบบโรงงานน้ำแข็ง',
   description: 'ระบบบริหารงานขายและจัดการโรงงานน้ำแข็ง คิงส์สว่าง',
+  // 🌟 เพิ่มการตั้งค่าไอคอนแอปและเว็บแอปตรงนี้ครับ
+  icons: {
+    icon: '/logo.svg',       // ชี้ไปที่ไฟล์โลโก้ในโฟลเดอร์ public (เช่น public/logo.png)
+    shortcut: '/logo.svg',
+    apple: '/logo.svg',      // สำหรับแสดงไอคอนสวยๆ เวลา Add to Home Screen บน iPad/Tablet
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'คิงส์สว่าง POS',
+  },
 }
 
 export default function RootLayout({

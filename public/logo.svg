@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- พื้นหลังสีน้ำเงินเข้ม ไล่เฉดให้ดูพรีเมียมและเย็นตา -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B3D91" />
+      <stop offset="100%" stop-color="#3A7BD5" />
+    </linearGradient>
+  </defs>
+
+  <!-- กรอบแอปขอบมน (Squircle) เหมือนแอปในแท็บเล็ต/ไอแพด -->
+  <rect x="16" y="16" width="480" height="480" rx="110" fill="url(#bg-grad)" />
+
+  <!-- ก้อนน้ำแข็ง 3 มิติ (Ice Block) -->
+  <!-- ด้านบน (สว่างสุด รับแสง) -->
+  <path d="M256 130 L386 205 L256 280 L126 205 Z" fill="#FFFFFF" />
+  <!-- ด้านขวา (สีฟ้าอ่อน) -->
+  <path d="M256 280 L386 205 L386 345 L256 420 Z" fill="#A1D6FF" />
+  <!-- ด้านซ้าย (สีฟ้าเข้ม) -->
+  <path d="M126 205 L256 280 L256 420 L126 345 Z" fill="#4FB3FF" />
+
+  <!-- เส้นตัดขอบตกแต่งให้ดูใสเป็นคริสตัล -->
+  <path d="M256 130 L256 280" stroke="#E6F4FF" stroke-width="4" stroke-linecap="round"/>
+  <path d="M126 205 L256 280 L386 205" stroke="#FFFFFF" stroke-width="4" stroke-linejoin="round" fill="none"/>
+  <path d="M256 280 L256 420" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- ประกายความเย็น (Sparkles) -->
+  <path d="M160 140 L165 120 L170 140 L190 145 L170 150 L165 170 L160 150 L140 145 Z" fill="#FFFFFF" opacity="0.9"/>
+  <path d="M360 360 L363 345 L366 360 L381 363 L366 366 L363 381 L360 366 L345 363 Z" fill="#FFFFFF" opacity="0.7"/>
+</svg>
