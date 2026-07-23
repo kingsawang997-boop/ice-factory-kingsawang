@@ -33,7 +33,6 @@ export default function RouteSettlementPage() {
   const [selectedDebtorId, setSelectedDebtorId] = useState('')
   const [selectedDebtorName, setSelectedDebtorName] = useState('')
 
-  // 🌟 State สำหรับดูรายละเอียดบิลในประวัติ
   const [selectedDetailRecord, setSelectedDetailRecord] = useState<any>(null)
 
   useEffect(() => {
@@ -179,15 +178,29 @@ export default function RouteSettlementPage() {
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
     
+    // 🌟 แก้ไข: บันทึกหนี้ลงระบบลูกหนี้ (เปลี่ยนเป็น debtorId และ outstanding ให้ตรงฐานข้อมูล)
     if (finance.monthlyArrears > 0 && selectedDebtorId) {
-      const { data: debtorData } = await supabase.from('debtors').select('total_debt').eq('id', selectedDebtorId).single()
+      // ใช้ outstanding แทน total_debt
+      const { data: debtorData } = await supabase.from('debtors').select('outstanding').eq('id', selectedDebtorId).single()
+      
       if (debtorData) {
         const itemDesc = debtorItems.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
+        
+        // บันทึกธุรกรรม (ใช้ debtorId ตัวพิมพ์ใหญ่ I)
         await supabase.from('debtor_transactions').insert([{
-          id: `TRX-${Date.now()}`, debtor_id: selectedDebtorId, date: reportDate, type: 'borrow',
-          amount: finance.monthlyArrears, note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, by: cashierName
+          id: `TRX-${Date.now()}`, 
+          debtorId: selectedDebtorId, 
+          date: reportDate, 
+          type: 'borrow',
+          amount: finance.monthlyArrears, 
+          note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, 
+          by: cashierName
         }])
-        await supabase.from('debtors').update({ total_debt: Number(debtorData.total_debt || 0) + Number(finance.monthlyArrears) }).eq('id', selectedDebtorId)
+        
+        // อัปเดตยอดหนี้คงเหลือลูกหนี้ (ใช้ outstanding)
+        await supabase.from('debtors').update({ 
+          outstanding: Number(debtorData.outstanding || 0) + Number(finance.monthlyArrears) 
+        }).eq('id', selectedDebtorId)
       }
     }
 
@@ -384,7 +397,6 @@ export default function RouteSettlementPage() {
                     historyRecords.map(record => (
                       <tr key={record.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                         <td className="p-4">
-                          {/* 🌟 คลิกที่เลขที่บิลเพื่อดูรายละเอียดสินค้า */}
                           <button onClick={() => setSelectedDetailRecord(record)} className="font-bold text-blue-600 hover:underline text-left">
                             {new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
                           </button>
@@ -405,7 +417,7 @@ export default function RouteSettlementPage() {
         )}
       </div>
 
-      {/* 🌟 ป๊อปอัป Modal แสดงรายละเอียดรายการสินค้าเมื่อคลิกดูประวัติ */}
+      {/* ป๊อปอัป Modal แสดงรายละเอียดรายการสินค้าเมื่อคลิกดูประวัติ */}
       {selectedDetailRecord && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
@@ -489,7 +501,7 @@ export default function RouteSettlementPage() {
                   <label className="font-bold text-slate-600 text-xs">เลือกลูกหนี้:</label>
                   <select value={tempDebtorId} onChange={e => setTempDebtorId(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50 text-xs">
                     <option value="">-- กรุณาเลือกลูกหนี้ --</option>
-                    {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ค้างเดิม: {d.total_debt || 0} บ.)</option>)}
+                    {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ค้างเดิม: {d.outstanding || 0} บ.)</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -538,7 +550,7 @@ export default function RouteSettlementPage() {
         </div>
       )}
 
-      {/* 🌟 หน้ากระดาษพิมพ์ข้อมูลทั้งหมดตามข้อ 2 */}
+      {/* หน้ากระดาษพิมพ์ข้อมูลทั้งหมด */}
       {printSlip && (
         <div className="hidden print:block text-black font-sans bg-white p-10 max-w-4xl mx-auto min-h-screen">
           <div className="text-center mb-6 pb-4 border-b-4 border-black">
@@ -620,7 +632,6 @@ export default function RouteSettlementPage() {
             </tbody>
           </table>
 
-          {/* สรุปการรับเงินสด */}
           <table className="w-full border-collapse border-2 border-black text-xs mb-4">
             <thead><tr className="bg-gray-200 border-b-2 border-black"><th className="border-r border-black py-1.5 px-3 text-left">การรับเงิน & ชำระเงิน</th><th className="py-1.5 px-3 text-right w-40">จำนวนเงิน</th></tr></thead>
             <tbody>
