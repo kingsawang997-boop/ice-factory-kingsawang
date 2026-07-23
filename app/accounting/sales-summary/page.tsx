@@ -24,7 +24,6 @@ export default function RouteSettlementPage() {
   const [finance, setFinance] = useState({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
 
-  // State สำหรับป๊อปอัปเลือกลูกหนี้
   const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
   const [debtorsList, setDebtorsList] = useState<any[]>([])
   const [tempDebtorId, setTempDebtorId] = useState('')
@@ -178,26 +177,27 @@ export default function RouteSettlementPage() {
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
     
-    // 🌟 แก้ไข: บันทึกหนี้ลงระบบลูกหนี้ (เปลี่ยนเป็น debtorId และ outstanding ให้ตรงฐานข้อมูล)
+    // 🌟 แก้ไข: บันทึกหนี้ลงระบบลูกหนี้ (เปลี่ยนเป็น debtor_id ตาม Schema)
     if (finance.monthlyArrears > 0 && selectedDebtorId) {
-      // ใช้ outstanding แทน total_debt
+      // ดึงยอด outstanding จาก debtors
       const { data: debtorData } = await supabase.from('debtors').select('outstanding').eq('id', selectedDebtorId).single()
       
       if (debtorData) {
         const itemDesc = debtorItems.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
         
-        // บันทึกธุรกรรม (ใช้ debtorId ตัวพิมพ์ใหญ่ I)
+        // 🌟 บันทึกธุรกรรม (ใช้ debtor_id) และบันทึก Array Items ลงฐานข้อมูลด้วย
         await supabase.from('debtor_transactions').insert([{
           id: `TRX-${Date.now()}`, 
-          debtorId: selectedDebtorId, 
+          debtor_id: selectedDebtorId, 
           date: reportDate, 
           type: 'borrow',
           amount: finance.monthlyArrears, 
           note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, 
-          by: cashierName
+          items: debtorItems, // บันทึก JSON ลงคอลัมน์ items ด้วย
+          // by: cashierName (เพิ่มโดยอัตโนมัติถ้าไม่มีปัญหา)
         }])
         
-        // อัปเดตยอดหนี้คงเหลือลูกหนี้ (ใช้ outstanding)
+        // 🌟 อัปเดตยอดหนี้คงเหลือลูกหนี้ (ใช้ outstanding)
         await supabase.from('debtors').update({ 
           outstanding: Number(debtorData.outstanding || 0) + Number(finance.monthlyArrears) 
         }).eq('id', selectedDebtorId)

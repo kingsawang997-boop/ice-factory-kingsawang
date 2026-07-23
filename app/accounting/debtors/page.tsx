@@ -32,9 +32,9 @@ export default function DebtorsPage() {
     setIsLoading(false)
   }
 
-  // 🌟 ดึงประวัติธุรกรรม (ใช้ debtorId ตาม Schema ของคุณ)
+  // 🌟 ดึงประวัติธุรกรรม (ใช้ debtor_id ตาม Schema ของคุณเป๊ะๆ)
   const fetchTransactions = async (debtorId: string) => {
-    const { data } = await supabase.from('debtor_transactions').select('*').eq('debtorId', debtorId).order('createdAt', { ascending: false })
+    const { data } = await supabase.from('debtor_transactions').select('*').eq('debtor_id', debtorId).order('createdAt', { ascending: false })
     if (data) setTransactions(data)
   }
 
@@ -74,13 +74,13 @@ export default function DebtorsPage() {
     // บันทึกประวัติการจ่าย
     await supabase.from('debtor_transactions').insert([{
       id: `PAY-${Date.now()}`,
-      debtorId: selectedDebtor.id, // 🌟 ใช้ debtorId
-      debtorName: selectedDebtor.name,
+      debtor_id: selectedDebtor.id, // 🌟 ใช้ debtor_id (Snake Case)
+      // ลบ debtorName ทิ้งเพราะไม่มีใน Schema ในภาพ
       date: new Date().toISOString().split('T')[0],
       type: 'pay',
       amount: payAmount,
       note: payForm.note ? `ชำระหนี้: ${payForm.note}` : 'ชำระหนี้ค้าง',
-      by: employeeName
+      // by: employeeName
     }])
 
     // อัปเดตยอดหนี้คงเหลือ
@@ -200,7 +200,7 @@ export default function DebtorsPage() {
                         <th className="p-4 font-black whitespace-nowrap">อ้างอิงเอกสาร</th>
                         <th className="p-4 font-black min-w-[250px]">รายการสินค้า / หมายเหตุ</th>
                         <th className="p-4 font-black text-right whitespace-nowrap">ยอดเงิน (บาท)</th>
-                        <th className="p-4 font-black text-center whitespace-nowrap">ผู้ทำรายการ</th>
+                        {/* <th className="p-4 font-black text-center whitespace-nowrap">ผู้ทำรายการ</th> */}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -218,7 +218,7 @@ export default function DebtorsPage() {
                             <tr key={trx.id} className="hover:bg-slate-50 transition-colors align-top">
                               <td className="p-4">
                                 <p className="font-bold text-slate-800">{trx.date}</p>
-                                <p className="text-[10px] text-slate-400 font-bold mt-0.5">{new Date(trx.createdAt).toLocaleTimeString('th-TH')}</p>
+                                <p className="text-[10px] text-slate-400 font-bold mt-0.5">{trx.createdAt ? new Date(trx.createdAt).toLocaleTimeString('th-TH') : '-'}</p>
                               </td>
                               <td className="p-4 text-center">
                                 <span className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wide ${isBorrow ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
@@ -244,7 +244,7 @@ export default function DebtorsPage() {
                               <td className={`p-4 text-right font-black text-base ${isBorrow ? 'text-rose-600' : 'text-emerald-500'}`}>
                                 {isBorrow ? '+' : '-'}{Number(trx.amount).toLocaleString()}
                               </td>
-                              <td className="p-4 text-center font-bold text-slate-500 text-[11px]">{trx.by}</td>
+                              {/* <td className="p-4 text-center font-bold text-slate-500 text-[11px]">{trx.by || '-'}</td> */}
                             </tr>
                           )
                         })
