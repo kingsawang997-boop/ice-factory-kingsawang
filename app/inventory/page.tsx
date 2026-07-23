@@ -36,7 +36,9 @@ export default function InventoryCheckPage() {
   const fetchInventory = async () => {
     setIsLoading(true)
     const { data: prodData } = await supabase.from('products').select('*').eq('category', 'main').order('id')
-    const { data: logData } = await supabase.from('inventory_logs').select('*').order('createdAt', { ascending: false }).limit(20)
+    
+    // 🌟 แก้ไข: ดึงข้อมูลและเรียงลำดับจากคอลัมน์ date ตาม Database Schema ของคุณ
+    const { data: logData } = await supabase.from('inventory_logs').select('*').order('date', { ascending: false }).limit(20)
     
     if (prodData) setProducts(prodData)
     if (logData) setLogs(logData)
@@ -70,10 +72,12 @@ export default function InventoryCheckPage() {
 
     await supabase.from('products').update({ stock: newStock }).eq('id', product.id)
     
+    // 🌟 แก้ไข: บันทึกลงตาราง inventory_logs ให้ตรงชื่อคอลัมน์ใน Supabase
     await supabase.from('inventory_logs').insert([{
       id: `LOG-${Date.now()}`,
-      productId: product.id,
-      productName: product.name,
+      date: new Date().toISOString(), // ส่งเวลาเข้าคอลัมน์ date
+      product_id: product.id,
+      product_name: product.name,
       type: numpad.type,
       qty: qty,
       note: note,
@@ -221,11 +225,13 @@ export default function InventoryCheckPage() {
                       {log.type === 'IN' ? '+' : '-'}{log.qty}
                     </span>
                   </div>
-                  <p className="font-black text-slate-800 text-base mb-1">{log.productName}</p>
+                  {/* 🌟 แสดงชื่อสินค้าที่ดึงมาจาก product_name */}
+                  <p className="font-black text-slate-800 text-base mb-1">{log.product_name}</p>
                   <p className="text-[11px] text-blue-600 font-bold mb-2 bg-blue-50 inline-block px-2 py-0.5 rounded">{log.note}</p>
                   <div className="flex justify-between items-center mt-2 pt-3 border-t border-slate-100 text-[10px] text-slate-400 font-bold">
                     <span className="flex items-center gap-1">👤 บันทึกโดย: {log.by}</span>
-                    <span>{new Date(log.createdAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.</span>
+                    {/* 🌟 แปลงวันที่จากคอลัมน์ date มาแสดงผล */}
+                    <span>{log.date ? new Date(log.date).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-'} น.</span>
                   </div>
                 </div>
                ))
