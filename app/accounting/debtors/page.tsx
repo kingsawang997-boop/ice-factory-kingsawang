@@ -12,7 +12,7 @@ export default function DebtorsPage() {
 
   // States สำหรับป๊อปอัป
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
-  const [newDebtorForm, setNewDebtorForm] = useState({ name: '', phone: '', address: '' })
+  const [newDebtorForm, setNewDebtorForm] = useState({ name: '', phone: '', address: '', route: 'สาย 1 (ในเมือง)', taxId: '', creditLimit: '50000' })
   
   const [isPayModalOpen, setIsPayModalOpen] = useState(false)
   const [payForm, setPayForm] = useState({ amount: '', note: '' })
@@ -24,6 +24,7 @@ export default function DebtorsPage() {
     fetchDebtors()
   }, [])
 
+  // 🌟 ดึงข้อมูลลูกหนี้ (ใช้ outstanding ตาม Schema ของคุณ)
   const fetchDebtors = async () => {
     setIsLoading(true)
     const { data } = await supabase.from('debtors').select('*').order('name')
@@ -31,8 +32,9 @@ export default function DebtorsPage() {
     setIsLoading(false)
   }
 
+  // 🌟 ดึงประวัติธุรกรรม (ใช้ debtorId ตาม Schema ของคุณ)
   const fetchTransactions = async (debtorId: string) => {
-    const { data } = await supabase.from('debtor_transactions').select('*').eq('debtor_id', debtorId).order('createdAt', { ascending: false })
+    const { data } = await supabase.from('debtor_transactions').select('*').eq('debtorId', debtorId).order('createdAt', { ascending: false })
     if (data) setTransactions(data)
   }
 
@@ -47,13 +49,16 @@ export default function DebtorsPage() {
       id: `CUST-${Date.now().toString().slice(-6)}`,
       name: newDebtorForm.name, 
       phone: newDebtorForm.phone, 
-      address: newDebtorForm.address, 
-      total_debt: 0 
+      address: newDebtorForm.address,
+      route: newDebtorForm.route,
+      taxId: newDebtorForm.taxId,
+      creditLimit: Number(newDebtorForm.creditLimit),
+      outstanding: 0 // 🌟 ใช้ outstanding
     }])
     if (!error) {
       alert('เพิ่มลูกหนี้สำเร็จ')
       setIsAddModalOpen(false)
-      setNewDebtorForm({ name: '', phone: '', address: '' })
+      setNewDebtorForm({ name: '', phone: '', address: '', route: 'สาย 1 (ในเมือง)', taxId: '', creditLimit: '50000' })
       fetchDebtors()
     } else { alert(error.message) }
   }
@@ -63,13 +68,14 @@ export default function DebtorsPage() {
     if (payAmount <= 0) return alert('กรุณาระบุจำนวนเงินที่ถูกต้อง')
     if (!selectedDebtor) return
 
-    const { data: currentDebtor } = await supabase.from('debtors').select('total_debt').eq('id', selectedDebtor.id).single()
-    const newDebt = Number(currentDebtor?.total_debt || 0) - payAmount
+    const { data: currentDebtor } = await supabase.from('debtors').select('outstanding').eq('id', selectedDebtor.id).single()
+    const newDebt = Number(currentDebtor?.outstanding || 0) - payAmount
 
     // บันทึกประวัติการจ่าย
     await supabase.from('debtor_transactions').insert([{
       id: `PAY-${Date.now()}`,
-      debtor_id: selectedDebtor.id,
+      debtorId: selectedDebtor.id, // 🌟 ใช้ debtorId
+      debtorName: selectedDebtor.name,
       date: new Date().toISOString().split('T')[0],
       type: 'pay',
       amount: payAmount,
@@ -78,7 +84,7 @@ export default function DebtorsPage() {
     }])
 
     // อัปเดตยอดหนี้คงเหลือ
-    await supabase.from('debtors').update({ total_debt: newDebt }).eq('id', selectedDebtor.id)
+    await supabase.from('debtors').update({ outstanding: newDebt }).eq('id', selectedDebtor.id)
 
     alert('✅ บันทึกรับชำระเงินสำเร็จ')
     setIsPayModalOpen(false)
@@ -86,26 +92,31 @@ export default function DebtorsPage() {
     fetchDebtors()
     
     // อัปเดตข้อมูลที่เลือกอยู่ปัจจุบัน
-    setSelectedDebtor({ ...selectedDebtor, total_debt: newDebt })
+    setSelectedDebtor({ ...selectedDebtor, outstanding: newDebt })
     fetchTransactions(selectedDebtor.id)
   }
 
-  // 🌟 ฟังก์ชันแกะข้อมูล (Parse) หมายเหตุที่มาจากหน้าบัญชี เพื่อแยกเลขที่เอกสาร และ รายการสินค้า
+  // 🌟 ฟังก์ชันแกะข้อมูลบิลจากหน้าบัญชี
   const parseTransactionNote = (note: string) => {
+    if (!note) return { docNo: '-', itemsDesc: '-' }
+    
     let docNo = '-'
-    let items = note
+    let itemsDesc = note
 
     if (note.includes('[เลขที่เอกสาร:')) {
-      // ดึงเลขที่เอกสาร
       const docMatch = note.match(/\[เลขที่เอกสาร:\s*(.*?)\]/)
       if (docMatch) docNo = docMatch[1]
       
-      // ดึงรายการสินค้า (อยู่หลังคำว่า รายการ: และก่อนคำว่า (สายส่ง)
-      const itemsMatch = note.match(/รายการ:\s*(.*?)\s*\(/)
-      if (itemsMatch) items = itemsMatch[1]
-      else items = note.replace(/\[.*?\]\s*/, '') // เผื่อกรณีหา (สายส่ง) ไม่เจอ
+      const itemStartIdx = note.indexOf('รายการ:')
+      const routeStartIdx = note.indexOf('(สายส่ง:')
+      
+      if (itemStartIdx !== -1 && routeStartIdx !== -1) {
+        itemsDesc = note.substring(itemStartIdx + 7, routeStartIdx).trim()
+      } else if (itemStartIdx !== -1) {
+        itemsDesc = note.substring(itemStartIdx + 7).trim()
+      }
     }
-    return { docNo, items }
+    return { docNo, itemsDesc }
   }
 
   return (
@@ -134,7 +145,8 @@ export default function DebtorsPage() {
                   <p className="text-xs font-bold">{debtor.phone || 'ไม่ระบุเบอร์'}</p>
                   <div className="text-right">
                     <p className="text-[10px] font-bold uppercase tracking-wider opacity-80 mb-0.5">ยอดค้างชำระ</p>
-                    <p className={`font-black text-lg leading-none ${selectedDebtor?.id === debtor.id ? 'text-white' : Number(debtor.total_debt) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(debtor.total_debt || 0).toLocaleString()} บ.</p>
+                    {/* 🌟 แก้ไขเป็น outstanding ป้องกันค่า NaN */}
+                    <p className={`font-black text-lg leading-none ${selectedDebtor?.id === debtor.id ? 'text-white' : Number(debtor.outstanding) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(debtor.outstanding || 0).toLocaleString()} บ.</p>
                   </div>
                 </div>
               </button>
@@ -162,7 +174,8 @@ export default function DebtorsPage() {
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-6 w-full md:w-auto shadow-inner">
                 <div>
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">ยอดค้างชำระสะสม</p>
-                  <p className={`text-3xl font-black ${Number(selectedDebtor.total_debt) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(selectedDebtor.total_debt).toLocaleString()} <span className="text-sm">บาท</span></p>
+                  {/* 🌟 แก้ไขเป็น outstanding */}
+                  <p className={`text-3xl font-black ${Number(selectedDebtor.outstanding) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(selectedDebtor.outstanding || 0).toLocaleString()} <span className="text-sm">บาท</span></p>
                 </div>
                 <button onClick={() => setIsPayModalOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black px-6 py-3.5 rounded-xl shadow-md transition-all flex items-center gap-2">
                   <span>💰</span> รับชำระหนี้
@@ -195,12 +208,14 @@ export default function DebtorsPage() {
                         <tr><td colSpan={6} className="p-12 text-center text-slate-400 font-bold text-base">ไม่มีประวัติทำรายการ</td></tr>
                       ) : (
                         transactions.map(trx => {
-                          const isBorrow = trx.type === 'borrow'
+                          // รองรับทั้ง 'debt' และ 'borrow'
+                          const isBorrow = trx.type === 'borrow' || trx.type === 'debt'
+                          
                           // 🌟 เรียกใช้ฟังก์ชันแกะข้อมูล note
-                          const { docNo, items } = isBorrow ? parseTransactionNote(trx.note) : { docNo: '-', items: trx.note }
+                          const { docNo, itemsDesc } = isBorrow ? parseTransactionNote(trx.note) : { docNo: '-', itemsDesc: trx.note }
 
                           return (
-                            <tr key={trx.id} className="hover:bg-slate-50 transition-colors">
+                            <tr key={trx.id} className="hover:bg-slate-50 transition-colors align-top">
                               <td className="p-4">
                                 <p className="font-bold text-slate-800">{trx.date}</p>
                                 <p className="text-[10px] text-slate-400 font-bold mt-0.5">{new Date(trx.createdAt).toLocaleTimeString('th-TH')}</p>
@@ -212,7 +227,19 @@ export default function DebtorsPage() {
                               </td>
                               <td className="p-4 font-black text-slate-600">{docNo}</td>
                               <td className="p-4">
-                                <p className={`text-xs font-bold leading-relaxed ${isBorrow ? 'text-slate-700' : 'text-emerald-700'}`}>{items}</p>
+                                <p className={`text-xs font-bold leading-relaxed ${isBorrow ? 'text-slate-700' : 'text-emerald-700'}`}>{itemsDesc}</p>
+                                
+                                {/* 🌟 ถ้าข้อมูลในบิลถูกบันทึกมาเป็น JSON Array (จากระบบ POS หรือหน้าลงบิล) จะแสดงเป็นลิสต์สวยงาม */}
+                                {trx.items && Array.isArray(trx.items) && trx.items.length > 0 && (
+                                  <ul className="mt-2 space-y-1">
+                                    {trx.items.map((item: any, idx: number) => (
+                                      <li key={idx} className="text-[10px] text-slate-500 bg-white border border-slate-100 px-2 py-1 rounded flex justify-between">
+                                        <span>- {item.name} ({item.qty} x {item.price}บ.)</span>
+                                        <span className="font-bold text-slate-600">{Number(item.total || (item.qty * item.price)).toLocaleString()} บ.</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
                               </td>
                               <td className={`p-4 text-right font-black text-base ${isBorrow ? 'text-rose-600' : 'text-emerald-500'}`}>
                                 {isBorrow ? '+' : '-'}{Number(trx.amount).toLocaleString()}
@@ -250,12 +277,26 @@ export default function DebtorsPage() {
                 <input type="text" value={newDebtorForm.name} onChange={e => setNewDebtorForm({...newDebtorForm, name: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm" placeholder="เช่น ร้านป้าแจ๋ว มินิมาร์ท" />
               </div>
               <div className="space-y-1.5">
+                <label className="font-bold text-slate-600 text-xs">วงเงินเครดิตอนุมัติ</label>
+                <input type="number" value={newDebtorForm.creditLimit} onChange={e => setNewDebtorForm({...newDebtorForm, creditLimit: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm" placeholder="50000" />
+              </div>
+              <div className="space-y-1.5">
                 <label className="font-bold text-slate-600 text-xs">เบอร์โทรศัพท์</label>
                 <input type="text" value={newDebtorForm.phone} onChange={e => setNewDebtorForm({...newDebtorForm, phone: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm" placeholder="08X-XXX-XXXX" />
               </div>
               <div className="space-y-1.5">
+                <label className="font-bold text-slate-600 text-xs">สายส่งหลัก</label>
+                <select value={newDebtorForm.route} onChange={e => setNewDebtorForm({...newDebtorForm, route: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm bg-white">
+                  <option value="สาย 1 (ในเมือง)">สาย 1 (ในเมือง)</option>
+                  <option value="สาย 2 (โซนเหนือ)">สาย 2 (โซนเหนือ)</option>
+                  <option value="สาย 3 (อุตสาหกรรม)">สาย 3 (อุตสาหกรรม)</option>
+                  <option value="หน้าร้าน (POS)">หน้าร้าน (POS)</option>
+                  <option value="ไม่ได้ระบุ">ไม่ได้ระบุ</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
                 <label className="font-bold text-slate-600 text-xs">ที่อยู่ / รายละเอียด</label>
-                <textarea value={newDebtorForm.address} onChange={e => setNewDebtorForm({...newDebtorForm, address: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm resize-none" rows={3} placeholder="รายละเอียดที่อยู่..." />
+                <textarea value={newDebtorForm.address} onChange={e => setNewDebtorForm({...newDebtorForm, address: e.target.value})} className="w-full p-3 rounded-xl border border-slate-300 focus:border-blue-500 outline-none font-bold text-sm resize-none" rows={2} placeholder="รายละเอียดที่อยู่..." />
               </div>
               <button onClick={handleAddDebtor} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl shadow-lg transition-transform active:scale-95 mt-2">
                 บันทึกลูกหนี้
@@ -276,14 +317,14 @@ export default function DebtorsPage() {
             <div className="p-6 space-y-5">
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-center">
                 <p className="text-xs font-bold text-slate-500 mb-1">ยอดหนี้ค้างชำระของ {selectedDebtor.name}</p>
-                <p className="text-3xl font-black text-rose-600">{Number(selectedDebtor.total_debt).toLocaleString()} <span className="text-sm">บ.</span></p>
+                <p className="text-3xl font-black text-rose-600">{Number(selectedDebtor.outstanding || 0).toLocaleString()} <span className="text-sm">บ.</span></p>
               </div>
 
               <div className="space-y-1.5">
                 <label className="font-black text-slate-700 text-sm">จำนวนเงินที่ชำระ (บาท) <span className="text-rose-500">*</span></label>
                 <input type="number" min="1" value={payForm.amount} onChange={e => setPayForm({...payForm, amount: e.target.value})} className="w-full p-4 rounded-xl border-2 border-emerald-200 focus:border-emerald-500 outline-none font-black text-2xl text-emerald-600 text-center bg-emerald-50/30" placeholder="0" />
                 <div className="flex gap-2 mt-2">
-                  <button onClick={() => setPayForm({...payForm, amount: selectedDebtor.total_debt})} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 py-1.5 rounded-lg text-xs font-bold transition-colors">จ่ายเต็มจำนวน</button>
+                  <button onClick={() => setPayForm({...payForm, amount: selectedDebtor.outstanding})} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 py-1.5 rounded-lg text-xs font-bold transition-colors">จ่ายเต็มจำนวน</button>
                 </div>
               </div>
               <div className="space-y-1.5">
