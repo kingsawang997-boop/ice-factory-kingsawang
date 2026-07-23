@@ -24,7 +24,6 @@ export default function DebtorsPage() {
     fetchDebtors()
   }, [])
 
-  // 🌟 ดึงข้อมูลลูกหนี้ (ใช้ outstanding ตาม Schema ของคุณ)
   const fetchDebtors = async () => {
     setIsLoading(true)
     const { data } = await supabase.from('debtors').select('*').order('name')
@@ -32,10 +31,24 @@ export default function DebtorsPage() {
     setIsLoading(false)
   }
 
-  // 🌟 ดึงประวัติธุรกรรม (ใช้ debtor_id ตาม Schema ของคุณเป๊ะๆ)
+  // 🌟 ฟังก์ชันที่แก้ไข: เปลี่ยนการ Order จาก createdAt เป็น date
   const fetchTransactions = async (debtorId: string) => {
-    const { data } = await supabase.from('debtor_transactions').select('*').eq('debtor_id', debtorId).order('createdAt', { ascending: false })
-    if (data) setTransactions(data)
+    const { data, error } = await supabase
+      .from('debtor_transactions')
+      .select('*')
+      .eq('debtor_id', debtorId)
+      .order('date', { ascending: false }) // ใช้คอลัมน์ date แทน
+      
+    if (error) {
+      console.error("Error fetching transactions:", error)
+      return
+    }
+
+    if (data) {
+      // จัดเรียงเสริมด้วย id (ซึ่งมี Date.now() ซ่อนอยู่) เพื่อให้รายการล่าสุดในวันเดียวกันขึ้นก่อน
+      const sortedData = data.sort((a, b) => b.id.localeCompare(a.id));
+      setTransactions(sortedData)
+    }
   }
 
   const handleSelectDebtor = (debtor: any) => {
@@ -53,7 +66,7 @@ export default function DebtorsPage() {
       route: newDebtorForm.route,
       taxId: newDebtorForm.taxId,
       creditLimit: Number(newDebtorForm.creditLimit),
-      outstanding: 0 // 🌟 ใช้ outstanding
+      outstanding: 0
     }])
     if (!error) {
       alert('เพิ่มลูกหนี้สำเร็จ')
@@ -74,13 +87,11 @@ export default function DebtorsPage() {
     // บันทึกประวัติการจ่าย
     await supabase.from('debtor_transactions').insert([{
       id: `PAY-${Date.now()}`,
-      debtor_id: selectedDebtor.id, // 🌟 ใช้ debtor_id (Snake Case)
-      // ลบ debtorName ทิ้งเพราะไม่มีใน Schema ในภาพ
+      debtor_id: selectedDebtor.id, 
       date: new Date().toISOString().split('T')[0],
       type: 'pay',
       amount: payAmount,
-      note: payForm.note ? `ชำระหนี้: ${payForm.note}` : 'ชำระหนี้ค้าง',
-      // by: employeeName
+      note: payForm.note ? `ชำระหนี้: ${payForm.note}` : 'ชำระหนี้ค้าง'
     }])
 
     // อัปเดตยอดหนี้คงเหลือ
@@ -96,7 +107,6 @@ export default function DebtorsPage() {
     fetchTransactions(selectedDebtor.id)
   }
 
-  // 🌟 ฟังก์ชันแกะข้อมูลบิลจากหน้าบัญชี
   const parseTransactionNote = (note: string) => {
     if (!note) return { docNo: '-', itemsDesc: '-' }
     
@@ -145,7 +155,6 @@ export default function DebtorsPage() {
                   <p className="text-xs font-bold">{debtor.phone || 'ไม่ระบุเบอร์'}</p>
                   <div className="text-right">
                     <p className="text-[10px] font-bold uppercase tracking-wider opacity-80 mb-0.5">ยอดค้างชำระ</p>
-                    {/* 🌟 แก้ไขเป็น outstanding ป้องกันค่า NaN */}
                     <p className={`font-black text-lg leading-none ${selectedDebtor?.id === debtor.id ? 'text-white' : Number(debtor.outstanding) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(debtor.outstanding || 0).toLocaleString()} บ.</p>
                   </div>
                 </div>
@@ -174,7 +183,6 @@ export default function DebtorsPage() {
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-6 w-full md:w-auto shadow-inner">
                 <div>
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">ยอดค้างชำระสะสม</p>
-                  {/* 🌟 แก้ไขเป็น outstanding */}
                   <p className={`text-3xl font-black ${Number(selectedDebtor.outstanding) > 0 ? 'text-rose-600' : 'text-emerald-500'}`}>{Number(selectedDebtor.outstanding || 0).toLocaleString()} <span className="text-sm">บาท</span></p>
                 </div>
                 <button onClick={() => setIsPayModalOpen(true)} className="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white font-black px-6 py-3.5 rounded-xl shadow-md transition-all flex items-center gap-2">
@@ -200,25 +208,20 @@ export default function DebtorsPage() {
                         <th className="p-4 font-black whitespace-nowrap">อ้างอิงเอกสาร</th>
                         <th className="p-4 font-black min-w-[250px]">รายการสินค้า / หมายเหตุ</th>
                         <th className="p-4 font-black text-right whitespace-nowrap">ยอดเงิน (บาท)</th>
-                        {/* <th className="p-4 font-black text-center whitespace-nowrap">ผู้ทำรายการ</th> */}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {transactions.length === 0 ? (
-                        <tr><td colSpan={6} className="p-12 text-center text-slate-400 font-bold text-base">ไม่มีประวัติทำรายการ</td></tr>
+                        <tr><td colSpan={5} className="p-12 text-center text-slate-400 font-bold text-base">ไม่มีประวัติทำรายการ</td></tr>
                       ) : (
                         transactions.map(trx => {
-                          // รองรับทั้ง 'debt' และ 'borrow'
                           const isBorrow = trx.type === 'borrow' || trx.type === 'debt'
-                          
-                          // 🌟 เรียกใช้ฟังก์ชันแกะข้อมูล note
                           const { docNo, itemsDesc } = isBorrow ? parseTransactionNote(trx.note) : { docNo: '-', itemsDesc: trx.note }
 
                           return (
                             <tr key={trx.id} className="hover:bg-slate-50 transition-colors align-top">
                               <td className="p-4">
                                 <p className="font-bold text-slate-800">{trx.date}</p>
-                                <p className="text-[10px] text-slate-400 font-bold mt-0.5">{trx.createdAt ? new Date(trx.createdAt).toLocaleTimeString('th-TH') : '-'}</p>
                               </td>
                               <td className="p-4 text-center">
                                 <span className={`px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wide ${isBorrow ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>
@@ -229,12 +232,11 @@ export default function DebtorsPage() {
                               <td className="p-4">
                                 <p className={`text-xs font-bold leading-relaxed ${isBorrow ? 'text-slate-700' : 'text-emerald-700'}`}>{itemsDesc}</p>
                                 
-                                {/* 🌟 ถ้าข้อมูลในบิลถูกบันทึกมาเป็น JSON Array (จากระบบ POS หรือหน้าลงบิล) จะแสดงเป็นลิสต์สวยงาม */}
                                 {trx.items && Array.isArray(trx.items) && trx.items.length > 0 && (
                                   <ul className="mt-2 space-y-1">
                                     {trx.items.map((item: any, idx: number) => (
                                       <li key={idx} className="text-[10px] text-slate-500 bg-white border border-slate-100 px-2 py-1 rounded flex justify-between">
-                                        <span>- {item.name} ({item.qty} x {item.price}บ.)</span>
+                                        <span>- {item.productName || item.name} ({item.qty} x {item.price}บ.)</span>
                                         <span className="font-bold text-slate-600">{Number(item.total || (item.qty * item.price)).toLocaleString()} บ.</span>
                                       </li>
                                     ))}
@@ -244,7 +246,6 @@ export default function DebtorsPage() {
                               <td className={`p-4 text-right font-black text-base ${isBorrow ? 'text-rose-600' : 'text-emerald-500'}`}>
                                 {isBorrow ? '+' : '-'}{Number(trx.amount).toLocaleString()}
                               </td>
-                              {/* <td className="p-4 text-center font-bold text-slate-500 text-[11px]">{trx.by || '-'}</td> */}
                             </tr>
                           )
                         })
