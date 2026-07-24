@@ -184,8 +184,8 @@ export default function PermissionsPage() {
                       </div>
                     </td>
                     
-                    {/* วนลูปสร้าง Toggle Switches */}
-                    {['menu_pos', 'menu_purchase', 'menu_inventory', 'menu_payroll', 'menu_accounting', 'menu_admin'].map((field) => (
+                    {/* วนลูปสร้าง Toggle Switches พร้อมระบุว่าเป็น Array<keyof Role> */}
+                    {(['menu_pos', 'menu_purchase', 'menu_inventory', 'menu_payroll', 'menu_accounting', 'menu_admin'] as Array<keyof Role>).map((field) => (
                       <td key={field} className="p-5 text-center">
                         <button 
                           onClick={() => handleToggle(roles.findIndex(r => r.role === roleData.role), field)}
