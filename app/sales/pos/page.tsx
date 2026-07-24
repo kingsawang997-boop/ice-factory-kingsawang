@@ -36,7 +36,8 @@ type ReceiptItem = {
   unit?: string
 }
 
-type PrintReceipt = {
+// 🌟 ปรับปรุง Type ให้ชัดเจนแยกกัน ป้องกัน TypeScript Error
+type PrintReceiptData = {
   receiptNo: string
   date: string
   cashier: string
@@ -45,6 +46,10 @@ type PrintReceipt = {
   received: number
   change: number
   method: string
+}
+
+type ManualKickData = {
+  isManualKick: true
 }
 
 type CloseShiftSlip = {
@@ -85,9 +90,9 @@ export default function POSPage() {
   const [isFreeBill, setIsFreeBill] = useState(false)
   const [cashierName, setCashierName] = useState('พนักงาน')
   
-  // 🌟 ข้อ 2: ตั้งค่าเริ่มต้นเป็น 58mm ทันทีเป็นพื้นฐาน
+  // 🌟 ตั้งค่าเริ่มต้นเป็น 58mm ทันทีเป็นพื้นฐาน
   const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
-  const [printReceipt, setPrintReceipt] = useState<PrintReceipt | { isManualKick: true } | null>(null)
+  const [printReceipt, setPrintReceipt] = useState<PrintReceiptData | ManualKickData | null>(null)
 
   const [isClosingShift, setIsClosingShift] = useState(false)
   const [posCashToday, setPosCashToday] = useState(0)
@@ -230,7 +235,7 @@ export default function POSPage() {
   }
   // ==========================================
 
-  // 🚀 ข้อ 1: จัดการการพิมพ์แยกตาม Format (58mm ใช้ RawBT / A4 ใช้ระบบ Browser Print)
+  // 🚀 จัดการการพิมพ์แยกตาม Format (58mm ใช้ RawBT / A4 ใช้ระบบ Browser Print)
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     const finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -269,7 +274,6 @@ export default function POSPage() {
         drawReceiptAndPrint(billNo, printDateStr, cashierName, cart, totalAmount, actualReceive, finalChange);
         setTimeout(() => { clearCart(); fetchActiveProducts(); }, 1000);
       } else {
-        // 🌟 แก้ไขข้อ 1: รองรับการพิมพ์ A4 ทั้งบนมือถือและคอมพิวเตอร์
         setPrintReceipt(receiptData)
         setTimeout(() => { 
           window.print(); 
@@ -453,7 +457,7 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🚀 Modal: หน้าต่างรับชำระเงิน (🌟 ข้อ 3: จัดทรงใหม่ป้องกันแป้นพิมพ์บังจอแบบ POS แท้) */}
+      {/* 🚀 Modal: หน้าต่างรับชำระเงิน */}
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 bg-slate-900/70 backdrop-blur-sm print:hidden overflow-y-auto">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col my-auto animate-in zoom-in-95 duration-200 border border-slate-100">
@@ -483,7 +487,6 @@ export default function POSPage() {
 
                   {paymentMethod === 'cash' && (
                     <div className="space-y-2.5">
-                      {/* 🌟 ช่องกรอกแบบกระชับไม่ดันจอแตก */}
                       <input type="number" value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} placeholder="รับเงินมา..." className="w-full bg-slate-50 border-2 border-slate-200 px-3 py-2.5 rounded-xl focus:outline-none focus:border-blue-500 font-black text-2xl text-center text-slate-800 shadow-inner" />
                       
                       <div className="grid grid-cols-4 gap-1.5">
@@ -545,16 +548,16 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* 🖨️ โซนแสดงผลการพิมพ์ (ซ่อนตอนอยู่บนแท็บเล็ต 58mm แต่แสดงผลจริงเมื่อกดพิมพ์ A4 หรือหน้าปิดกะ) */}
+      {/* 🖨️ โซนแสดงผลการพิมพ์ */}
       {closeShiftSlip ? (
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
-      ) : printReceipt && !printReceipt.isManualKick && (
+      ) : printReceipt && !('isManualKick' in printReceipt) && (
         <div className="hidden print:block text-black font-sans bg-white mx-auto" style={printFormat === '58mm' ? { width: '50mm', padding: '0 2mm', fontSize: '11px' } : { width: '100%', maxWidth: '800px', padding: '40px', fontSize: '14px' }}>
           {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: ReceiptItem, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระเงินโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
         </div>
       )}
 
-      {printReceipt && printReceipt.isManualKick && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
+      {printReceipt && 'isManualKick' in printReceipt && (<div className="hidden print:block text-black text-[10px] text-center" style={{ width: '50mm' }}>.</div>)}
     </>
   )
 }

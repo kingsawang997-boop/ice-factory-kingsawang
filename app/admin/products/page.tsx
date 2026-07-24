@@ -33,7 +33,8 @@ export default function AdminProductsPage() {
       unit: product.unit || 'ชิ้น', 
       icon: product.icon || '📦', 
       image: product.image || '', 
-      isActive: product.isActive 
+      // 🌟 แก้ไข: เติม ?? true เพื่อป้องกันค่า undefined ตามที่ TypeScript แจ้งเตือน
+      isActive: product.isActive ?? true 
     })
     setIsModalOpen(true)
   }
@@ -80,9 +81,11 @@ export default function AdminProductsPage() {
     }
   }
 
-  const toggleActive = async (id: string, currentStatus: boolean) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, isActive: !currentStatus } : p))
-    await supabase.from('products').update({ isActive: !currentStatus }).eq('id', id)
+  // 🌟 แก้ไข: ทำให้ currentStatus รองรับ undefined ป้องกัน Error ซ้อน
+  const toggleActive = async (id: string, currentStatus?: boolean) => {
+    const isCurrentlyActive = currentStatus ?? true
+    setProducts(prev => prev.map(p => p.id === id ? { ...p, isActive: !isCurrentlyActive } : p))
+    await supabase.from('products').update({ isActive: !isCurrentlyActive }).eq('id', id)
   }
 
   const handleDelete = async (id: string, name: string) => {
@@ -91,6 +94,9 @@ export default function AdminProductsPage() {
       await supabase.from('products').delete().eq('id', id) 
     }
   }
+
+  // 🌟 เพิ่มตัวแปรสำหรับ Filter ข้อมูลที่ตกหล่นไป
+  const filteredProducts = products.filter(p => activeFilter === 'all' || p.category === activeFilter)
 
   return (
     <div className="space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen text-xs font-sans">
@@ -134,7 +140,7 @@ export default function AdminProductsPage() {
                 <tr><td colSpan={6} className="p-10 text-center text-slate-400 font-bold">ไม่มีข้อมูลสินค้า กรุณากด "เพิ่มสินค้าใหม่"</td></tr>
               ) : (
                 filteredProducts.map(product => (
-                  <tr key={product.id} className={`hover:bg-slate-50/50 transition-colors ${!product.isActive ? 'opacity-50 grayscale' : ''}`}>
+                  <tr key={product.id} className={`hover:bg-slate-50/50 transition-colors ${!(product.isActive ?? true) ? 'opacity-50 grayscale' : ''}`}>
                     <td className="p-4 text-center">
                       {product.image ? (
                         <div className="w-12 h-12 rounded-xl overflow-hidden shadow-sm mx-auto border border-slate-200 bg-white"><img src={product.image} alt={product.name} className="w-full h-full object-cover" /></div>
@@ -146,8 +152,8 @@ export default function AdminProductsPage() {
                     <td className="p-4 text-center"><span className={`px-3 py-1 rounded-lg text-[10px] font-bold border ${product.category === 'main' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>{product.category === 'main' ? 'กระสอบ/แพ็ค' : 'แบ่งขาย'}</span></td>
                     <td className="p-4 text-right"><span className="font-black text-blue-600 text-lg">{Number(product.price).toLocaleString()}</span><span className="text-[10px] text-slate-500 font-bold ml-1">บ. / {product.unit}</span></td>
                     <td className="p-4 text-center">
-                      <button onClick={() => toggleActive(product.id, product.isActive)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${product.isActive ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${product.isActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <button onClick={() => toggleActive(product.id, product.isActive)} className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${(product.isActive ?? true) ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${(product.isActive ?? true) ? 'translate-x-6' : 'translate-x-1'}`} />
                       </button>
                     </td>
                     <td className="p-4 text-center">
@@ -186,7 +192,6 @@ export default function AdminProductsPage() {
                     <option value="retail">แบ่งขาย (ปลีก)</option>
                   </select>
                 </div>
-                {/* 🌟 เพิ่มช่องกรอกหน่วยนับให้แล้วครับ */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-700">หน่วยนับ <span className="text-rose-500">*</span></label>
                   <input type="text" required value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="w-full border-2 border-slate-200 px-4 py-3 rounded-xl focus:border-blue-500 font-bold focus:outline-none" placeholder="กระสอบ, แพ็ค, แก้ว" />
