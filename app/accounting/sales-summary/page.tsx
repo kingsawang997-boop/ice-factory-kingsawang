@@ -1,8 +1,48 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-// Link import removed — not used in this file
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+
+// 🌟 ประกาศ Types ทั้งหมดไว้ด้านบน เพื่อให้ใช้งานร่วมกันได้ทั้งหน้า ป้องกัน TS Error
+type TruckRoute = { id: string; route_name: string; driver_name?: string }
+type Debtor = { id: string; name: string; outstanding?: number }
+type DebtorItem = { productName: string; qty: number; price: number }
+
+type IceBreakdown = { sold45?: number; sold40?: number; sold35?: number; service?: number }
+type PackBreakdown = { icePacks?: number; water1500?: number; water600?: number; water350?: number }
+type DebtorDetailsPrint = { debtorName?: string; docNo?: string; items?: { productName?: string; qty?: number; price?: number }[]; total?: number }
+type BagTracking = { grossLoad?: number; netLoad?: number; returnedToStock?: number; melted?: number; soldAndService?: number; customerOwe?: number; customerReturnOld?: number; expectedReturn?: number; actualReturn?: number; lostBagsToDeduct?: number }
+type RevenueSummary = { iceSales?: number; packSales?: number; total?: number }
+type CashSummary = { expected?: number; actual?: number; diff?: number }
+
+type SettlementDetails = {
+  date?: string
+  truck?: string
+  revenue?: RevenueSummary
+  bagTracking?: BagTracking
+  cash?: CashSummary
+  debtorDetails?: DebtorDetailsPrint | null
+  iceBreakdown?: IceBreakdown
+  packBreakdown?: PackBreakdown
+  [key: string]: any
+}
+
+type SettlementRecord = {
+  id: string
+  date?: string
+  routeName?: string
+  details?: SettlementDetails | null
+  expectedAmount?: number
+  cashAmount?: number
+  transferAmount?: number
+  creditAmount?: number
+  expenseAmount?: number
+  diffAmount?: number
+  note?: string
+  by?: string
+  status?: string
+  createdAt?: string
+}
 
 export default function RouteSettlementPage() {
   const [activeTab, setActiveTab] = useState<'form' | 'history'>('form')
@@ -12,9 +52,6 @@ export default function RouteSettlementPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  type TruckRoute = { id: string; route_name: string; driver_name?: string }
-  type Debtor = { id: string; name: string; outstanding?: number }
-  type DebtorItem = { productName: string; qty: number; price: number }
   const [truckRoutes, setTruckRoutes] = useState<TruckRoute[]>([])
   const [selectedTruck, setSelectedTruck] = useState('')
   const [reportDate, setReportDate] = useState(getTodayString())
@@ -35,11 +72,8 @@ export default function RouteSettlementPage() {
   const [selectedDebtorId, setSelectedDebtorId] = useState('')
   const [selectedDebtorName, setSelectedDebtorName] = useState('')
 
-  const [selectedDetailRecord, setSelectedDetailRecord] = useState<Record<string, unknown> | null>(null)
-
-  
-
-  
+  // 🌟 แก้ไข Type ให้ถูกต้อง ป้องกัน TS Error
+  const [selectedDetailRecord, setSelectedDetailRecord] = useState<SettlementRecord | null>(null)
 
   const fetchLivePrices = useCallback(async () => {
     const { data } = await supabase.from('products').select('name, price').eq('isActive', true)
@@ -66,11 +100,11 @@ export default function RouteSettlementPage() {
   }, [])
 
   const fetchTruckLoadingData = useCallback(async () => {
-    // reset UI state before fetching
     setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
     setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
     setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
     setSelectedDebtorId(''); setSelectedDebtorName('')
+    
     setIsPullingData(true)
     const { data } = await supabase.from('route_settlements').select('details').eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
 
@@ -170,6 +204,7 @@ export default function RouteSettlementPage() {
   const iceRevenue = (iceData.sold45 * adminSettings.icePrice1) + (iceData.sold40 * adminSettings.icePrice2) + (iceData.sold35 * adminSettings.icePrice3)
 
   const totalSoldAndServiceBags = iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.service
+  // 🌟 แก้ไขจุดที่เกิด Error: ใส่คำว่า iceData. นำหน้า
   const expectedEmptyBags = totalSoldAndServiceBags - iceData.customerOweBags + iceData.customerReturnOldBags
   const lostEmptyBags = expectedEmptyBags - iceData.returnEmptyBags
 
@@ -184,7 +219,6 @@ export default function RouteSettlementPage() {
   const cashDifference = finance.actualCash - expectedCash
 
   const updateIce = (field: keyof typeof iceData, value: string) => setIceData(prev => ({ ...prev, [field]: Number(value) }))
-  // removed unused `updatePack` to satisfy lint rules
   const updateFinance = (field: keyof typeof finance, value: string) => setFinance(prev => ({ ...prev, [field]: Number(value) }))
   const exactCash = () => updateFinance('actualCash', expectedCash.toString())
 
@@ -196,15 +230,12 @@ export default function RouteSettlementPage() {
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
     
-    // 🌟 แก้ไข: บันทึกหนี้ลงระบบลูกหนี้ (เปลี่ยนเป็น debtor_id ตาม Schema)
     if (finance.monthlyArrears > 0 && selectedDebtorId) {
-      // ดึงยอด outstanding จาก debtors
       const { data: debtorData } = await supabase.from('debtors').select('outstanding').eq('id', selectedDebtorId).single()
       
       if (debtorData) {
         const itemDesc = debtorItems.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
         
-        // 🌟 บันทึกธุรกรรม (ใช้ debtor_id) และบันทึก Array Items ลงฐานข้อมูลด้วย
         await supabase.from('debtor_transactions').insert([{
           id: `TRX-${Date.now()}`, 
           debtor_id: selectedDebtorId, 
@@ -212,11 +243,9 @@ export default function RouteSettlementPage() {
           type: 'borrow',
           amount: finance.monthlyArrears, 
           note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, 
-          items: debtorItems, // บันทึก JSON ลงคอลัมน์ items ด้วย
-          // by: cashierName (เพิ่มโดยอัตโนมัติถ้าไม่มีปัญหา)
+          items: debtorItems, 
         }])
         
-        // 🌟 อัปเดตยอดหนี้คงเหลือลูกหนี้ (ใช้ outstanding)
         await supabase.from('debtors').update({ 
           outstanding: Number(debtorData.outstanding || 0) + Number(finance.monthlyArrears) 
         }).eq('id', selectedDebtorId)
@@ -249,41 +278,6 @@ export default function RouteSettlementPage() {
 
   // TAB 2: ประวัติ
   const [historyDate, setHistoryDate] = useState(getTodayString())
-  type IceBreakdown = { sold45?: number; sold40?: number; sold35?: number; service?: number }
-  type PackBreakdown = { icePacks?: number; water1500?: number; water600?: number; water350?: number }
-  type DebtorDetailsPrint = { debtorName?: string; docNo?: string; items?: { productName?: string; qty?: number; price?: number }[]; total?: number }
-  type BagTracking = { grossLoad?: number; netLoad?: number; returnedToStock?: number; melted?: number; soldAndService?: number; customerOwe?: number; customerReturnOld?: number; expectedReturn?: number; actualReturn?: number; lostBagsToDeduct?: number }
-  type RevenueSummary = { iceSales?: number; packSales?: number; total?: number }
-  type CashSummary = { expected?: number; actual?: number; diff?: number }
-
-  type SettlementDetails = {
-    date?: string
-    truck?: string
-    revenue?: RevenueSummary
-    bagTracking?: BagTracking
-    cash?: CashSummary
-    debtorDetails?: DebtorDetailsPrint | null
-    iceBreakdown?: IceBreakdown
-    packBreakdown?: PackBreakdown
-    [key: string]: any
-  }
-
-  type SettlementRecord = {
-    id: string
-    date?: string
-    routeName?: string
-    details?: SettlementDetails | null
-    expectedAmount?: number
-    cashAmount?: number
-    transferAmount?: number
-    creditAmount?: number
-    expenseAmount?: number
-    diffAmount?: number
-    note?: string
-    by?: string
-    status?: string
-  }
-
   const [historyRecords, setHistoryRecords] = useState<SettlementRecord[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [printSlip, setPrintSlip] = useState<SettlementRecord | null>(null)
@@ -452,13 +446,13 @@ export default function RouteSettlementPage() {
                       <tr key={record.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                         <td className="p-4">
                           <button onClick={() => setSelectedDetailRecord(record)} className="font-bold text-blue-600 hover:underline text-left">
-                            {new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+                            {record.createdAt ? new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'} น.
                           </button>
                           <p className="text-[10px] text-slate-400 mt-0.5">{record.id}</p>
                         </td>
                         <td className="p-4 font-black text-slate-800">{record.routeName}</td>
                         <td className="p-4 text-right font-bold text-slate-700">{Number(record.expectedAmount).toLocaleString()} บ.</td>
-                        <td className="p-4 text-center">{record.details?.bagTracking?.lostBagsToDeduct > 0 ? <span className="text-rose-600 font-black bg-rose-50 px-2 py-1 rounded">{record.details.bagTracking.lostBagsToDeduct}</span> : <span className="text-emerald-500 font-bold">-</span>}</td>
+                        <td className="p-4 text-center">{record.details?.bagTracking?.lostBagsToDeduct && record.details.bagTracking.lostBagsToDeduct > 0 ? <span className="text-rose-600 font-black bg-rose-50 px-2 py-1 rounded">{record.details.bagTracking.lostBagsToDeduct}</span> : <span className="text-emerald-500 font-bold">-</span>}</td>
                         <td className="p-4 text-right font-black text-emerald-600">{Number(record.cashAmount).toLocaleString()} บ.</td>
                         <td className="p-4 text-center"><div className="flex gap-2 justify-center"><button onClick={() => handlePrint(record)} className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1">🖨️ พิมพ์</button><button onClick={() => handleDelete(record.id)} className="w-7 h-7 bg-rose-50 text-rose-500 hover:bg-rose-100 rounded-lg flex items-center justify-center transition-colors">✕</button></div></td>
                       </tr>
@@ -497,9 +491,9 @@ export default function RouteSettlementPage() {
                   <tbody className="divide-y divide-slate-100">
                     {selectedDetailRecord.details?.iceBreakdown ? (
                       <>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice1}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold45}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold45 * adminSettings.icePrice1).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice2}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold40}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold40 * adminSettings.icePrice2).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice3}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold35}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.iceBreakdown.sold35 * adminSettings.icePrice3).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice1}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold45}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold45 || 0) * adminSettings.icePrice1).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice2}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold40}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold40 || 0) * adminSettings.icePrice2).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice3}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold35}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold35 || 0) * adminSettings.icePrice3).toLocaleString()} บ.</td></tr>
                       </>
                     ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
                   </tbody>
@@ -515,10 +509,10 @@ export default function RouteSettlementPage() {
                   <tbody className="divide-y divide-slate-100">
                     {selectedDetailRecord.details?.packBreakdown ? (
                       <>
-                        <tr><td className="p-3">น้ำแข็งแพ็ค</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.icePacks}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.icePacks * adminSettings.icePackPrice).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 1500 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water1500}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water1500 * adminSettings.waterPrice1500).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 600 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water600}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water600 * adminSettings.waterPrice600).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 350 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water350}</td><td className="p-3 text-right font-bold">{(selectedDetailRecord.details.packBreakdown.water350 * adminSettings.waterPrice350).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำแข็งแพ็ค</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.icePacks}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.icePacks || 0) * adminSettings.icePackPrice).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 1500 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water1500}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water1500 || 0) * adminSettings.waterPrice1500).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 600 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water600}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water600 || 0) * adminSettings.waterPrice600).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 350 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water350}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water350 || 0) * adminSettings.waterPrice350).toLocaleString()} บ.</td></tr>
                       </>
                     ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
                   </tbody>
@@ -627,61 +621,61 @@ export default function RouteSettlementPage() {
             </thead>
             <tbody>
               <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black">-- หมวดน้ำแข็ง --</td></tr>
-              {printSlip.details?.iceBreakdown?.sold45 > 0 && (
+              {(printSlip.details?.iceBreakdown?.sold45 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice1}.-)</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold45} กระสอบ</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold45 * adminSettings.icePrice1).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.iceBreakdown?.sold45} กระสอบ</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.iceBreakdown?.sold45 || 0) * adminSettings.icePrice1).toLocaleString()}</td>
                 </tr>
               )}
-              {printSlip.details?.iceBreakdown?.sold40 > 0 && (
+              {(printSlip.details?.iceBreakdown?.sold40 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice2}.-)</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold40} กระสอบ</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold40 * adminSettings.icePrice2).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.iceBreakdown?.sold40} กระสอบ</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.iceBreakdown?.sold40 || 0) * adminSettings.icePrice2).toLocaleString()}</td>
                 </tr>
               )}
-              {printSlip.details?.iceBreakdown?.sold35 > 0 && (
+              {(printSlip.details?.iceBreakdown?.sold35 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice3}.-)</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.iceBreakdown.sold35} กระสอบ</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.iceBreakdown.sold35 * adminSettings.icePrice3).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.iceBreakdown?.sold35} กระสอบ</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.iceBreakdown?.sold35 || 0) * adminSettings.icePrice3).toLocaleString()}</td>
                 </tr>
               )}
 
               <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black border-t">-- หมวดสินค้าแพ็ค --</td></tr>
-              {printSlip.details?.packBreakdown?.icePacks > 0 && (
+              {(printSlip.details?.packBreakdown?.icePacks || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำแข็งแพ็ค</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.icePacks} แพ็ค</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.icePacks * adminSettings.icePackPrice).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.icePacks} แพ็ค</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.icePacks || 0) * adminSettings.icePackPrice).toLocaleString()}</td>
                 </tr>
               )}
-              {printSlip.details?.packBreakdown?.water1500 > 0 && (
+              {(printSlip.details?.packBreakdown?.water1500 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 1500 ml</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water1500} แพ็ค</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water1500 * adminSettings.waterPrice1500).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water1500} แพ็ค</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water1500 || 0) * adminSettings.waterPrice1500).toLocaleString()}</td>
                 </tr>
               )}
-              {printSlip.details?.packBreakdown?.water600 > 0 && (
+              {(printSlip.details?.packBreakdown?.water600 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 600 ml</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water600} แพ็ค</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water600 * adminSettings.waterPrice600).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water600} แพ็ค</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water600 || 0) * adminSettings.waterPrice600).toLocaleString()}</td>
                 </tr>
               )}
-              {printSlip.details?.packBreakdown?.water350 > 0 && (
+              {(printSlip.details?.packBreakdown?.water350 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 350 ml</td>
-                  <td className="border-r border-black p-1.5 text-center">{printSlip.details.packBreakdown.water350} แพ็ค</td>
-                  <td className="p-1.5 text-right">{(printSlip.details.packBreakdown.water350 * adminSettings.waterPrice350).toLocaleString()}</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water350} แพ็ค</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water350 || 0) * adminSettings.waterPrice350).toLocaleString()}</td>
                 </tr>
               )}
 
               <tr className="border-t-2 border-black bg-gray-50 font-black">
                 <td colSpan={2} className="border-r border-black p-2 text-right">ยอดรวมสุทธิ (Total Sales)</td>
-                <td className="p-2 text-right text-sm">{printSlip.expectedAmount.toLocaleString()} บาท</td>
+                <td className="p-2 text-right text-sm">{(printSlip.expectedAmount || 0).toLocaleString()} บาท</td>
               </tr>
             </tbody>
           </table>
@@ -689,11 +683,11 @@ export default function RouteSettlementPage() {
           <table className="w-full border-collapse border-2 border-black text-xs mb-4">
             <thead><tr className="bg-gray-200 border-b-2 border-black"><th className="border-r border-black py-1.5 px-3 text-left">การรับเงิน & ชำระเงิน</th><th className="py-1.5 px-3 text-right w-40">จำนวนเงิน</th></tr></thead>
             <tbody>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">โอนเข้าบริษัท</td><td className="p-1.5 text-right">{printSlip.transferAmount.toLocaleString()}</td></tr>
-              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">จ่ายค้างหนี้เก่า / ค้างรายวัน</td><td className="p-1.5 text-right">{printSlip.creditAmount.toLocaleString()}</td></tr>
+              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">โอนเข้าบริษัท</td><td className="p-1.5 text-right">{(printSlip.transferAmount || 0).toLocaleString()}</td></tr>
+              <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">จ่ายค้างหนี้เก่า / ค้างรายวัน</td><td className="p-1.5 text-right">{(printSlip.creditAmount || 0).toLocaleString()}</td></tr>
               <tr className="border-b border-gray-300"><td className="border-r border-black p-1.5 pl-4">ยอดเงินสดที่ต้องนำส่ง (Expected Cash)</td><td className="p-1.5 text-right font-bold">{printSlip.details?.cash?.expected?.toLocaleString()}</td></tr>
-              <tr className="border-b-2 border-black bg-gray-50 font-black"><td className="border-r border-black p-2 text-right">ยอดเงินสดส่งจริง (Actual Cash)</td><td className="p-2 text-right text-sm">{printSlip.cashAmount.toLocaleString()}</td></tr>
-              <tr><td className="border-r border-black p-2 text-right">ส่วนต่างเงินสด (Diff.)</td><td className="p-2 text-right font-bold">{printSlip.diffAmount === 0 ? 'พอดี (0)' : printSlip.diffAmount.toLocaleString()}</td></tr>
+              <tr className="border-b-2 border-black bg-gray-50 font-black"><td className="border-r border-black p-2 text-right">ยอดเงินสดส่งจริง (Actual Cash)</td><td className="p-2 text-right text-sm">{(printSlip.cashAmount || 0).toLocaleString()}</td></tr>
+              <tr><td className="border-r border-black p-2 text-right">ส่วนต่างเงินสด (Diff.)</td><td className="p-2 text-right font-bold">{printSlip.diffAmount === 0 ? 'พอดี (0)' : (printSlip.diffAmount || 0).toLocaleString()}</td></tr>
             </tbody>
           </table>
 
