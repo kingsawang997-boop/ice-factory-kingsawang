@@ -9,10 +9,13 @@ export default function DrawerLogsPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  type Log = { id: string; employee_name?: string; role?: string; print_status?: string; createdAt?: string }
+  // 🌟 เพิ่ม reason?: string เข้าไปตรงนี้ เพื่อแก้ปัญหา Build Error จาก TypeScript
+  type Log = { id: string; employee_name?: string; role?: string; print_status?: string; createdAt?: string; reason?: string }
+  
   const [logs, setLogs] = useState<Log[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [filterDate, setFilterDate] = useState(getTodayString())
+  
   const fetchLogs = useCallback(async () => {
     setIsLoading(true)
 
@@ -39,7 +42,7 @@ export default function DrawerLogsPage() {
   }, [fetchLogs])
 
   // ฟังก์ชันจัดสีป้ายสถานะตามรูปภาพเป๊ะๆ
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status?: string) => {
     if (status === 'พิมพ์บิล') {
       return <span className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg text-[10px] font-bold">พิมพ์บิล</span>
     } else if (status === 'ไม่พิมพ์บิล') {
@@ -47,7 +50,7 @@ export default function DrawerLogsPage() {
     } else if (status === 'ผู้ดูแลระบบ') {
       return <span className="px-3 py-1 bg-purple-50 text-purple-600 border border-purple-200 rounded-lg text-[10px] font-bold">ผู้ดูแลระบบ</span>
     }
-    return <span className="px-3 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-[10px] font-bold">{status}</span>
+    return <span className="px-3 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded-lg text-[10px] font-bold">{status || 'ไม่ระบุ'}</span>
   }
 
   // นับสถิติรายวัน
@@ -118,16 +121,16 @@ export default function DrawerLogsPage() {
                 
                 <div className="space-y-2 flex-1">
                   <h3 className="font-black text-slate-800 text-sm">
-                    {log.employee_name} <span className="text-xs text-slate-500 font-bold">({log.role})</span>
+                    {log.employee_name || 'พนักงานไม่ระบุ'} <span className="text-xs text-slate-500 font-bold">({log.role || '-'})</span>
                   </h3>
                   <p className="text-[11px] font-bold text-slate-600 bg-slate-50 inline-block px-2 py-1 rounded">
-                    {log.reason}
+                    {log.reason || '-'}
                   </p>
                 </div>
 
                 <div className="flex flex-row md:flex-col items-center md:items-end justify-between gap-2 border-t md:border-t-0 border-slate-100 pt-3 md:pt-0">
                   <span className="text-[10px] font-bold text-slate-400">
-                    {new Date(log.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' })} น.
+                    {log.createdAt ? new Date(log.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'medium' }) : '-'} น.
                   </span>
                   {getStatusBadge(log.print_status)}
                 </div>
