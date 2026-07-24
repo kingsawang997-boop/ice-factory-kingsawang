@@ -1,14 +1,83 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+type TabletNavProps = {
+  pathname: string
+  cashierName: string
+}
+
+type Product = {
+  id: string
+  name: string
+  category: string
+  price: number
+  unit?: string
+  image?: string
+  icon?: string
+  isActive?: boolean | string
+  stock?: number
+  color?: string
+}
+
+type CartItem = Product & {
+  qty: number
+}
+
+type ReceiptItem = {
+  id: string
+  name: string
+  qty: number
+  price: number
+  unit?: string
+}
+
+type PrintReceipt = {
+  receiptNo: string
+  date: string
+  cashier: string
+  items: ReceiptItem[]
+  total: number
+  received: number
+  change: number
+  method: string
+}
+
+type CloseShiftSlip = {
+  id: string
+  date: string
+  cashAmount: number
+  transferAmount: number
+  actualCash: number
+  diff: number
+  by: string
+}
+
+function TabletNav({ pathname, cashierName }: TabletNavProps) {
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+      <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
+      <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
+        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
+        <Link href="/inventory" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
+        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
+      </div>
+      <div className="bg-white px-4 py-3 md:py-3.5 rounded-2xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs md:text-sm shrink-0 flex items-center gap-2">
+        <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-lg">👤</span>
+        <span className="hidden md:inline">พนักงาน:</span> {cashierName}
+      </div>
+    </div>
+  )
+}
+
 export default function POSPage() {
-  const [products, setProducts] = useState<any[]>([])
+  const [products, setProducts] = useState<Product[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [cart, setCart] = useState<any[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState(false)
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash')
@@ -18,13 +87,13 @@ export default function POSPage() {
   
   // 🌟 ข้อ 2: ตั้งค่าเริ่มต้นเป็น 58mm ทันทีเป็นพื้นฐาน
   const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
-  const [printReceipt, setPrintReceipt] = useState<any>(null)
+  const [printReceipt, setPrintReceipt] = useState<PrintReceipt | { isManualKick: true } | null>(null)
 
   const [isClosingShift, setIsClosingShift] = useState(false)
   const [posCashToday, setPosCashToday] = useState(0)
   const [posTransferToday, setPosTransferToday] = useState(0)
   const [actualPosCash, setActualPosCash] = useState<number | string>('')
-  const [closeShiftSlip, setCloseShiftSlip] = useState<any>(null)
+  const [closeShiftSlip, setCloseShiftSlip] = useState<CloseShiftSlip | null>(null)
 
   const [isPinModalOpen, setIsPinModalOpen] = useState(false)
   const [pinInput, setPinInput] = useState('')
@@ -32,22 +101,27 @@ export default function POSPage() {
 
   const pathname = usePathname()
 
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) {
-      setCashierName(JSON.parse(session).name)
-    }
-    
-    fetchActiveProducts()
-    // เอาตัวเช็ค window.innerWidth ออก เพื่อให้ 58mm เป็นค่าเริ่มต้นเสมอตามที่คุณต้องการ
-  }, [])
-
   const fetchActiveProducts = async () => {
     setIsLoading(true)
     const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
-    if (data) setProducts(data.filter((p: any) => p.isActive === true || p.isActive === 'true'))
+    if (data) setProducts((data as Product[]).filter((p) => p.isActive === true || p.isActive === 'true'))
     setIsLoading(false)
   }
+
+  useEffect(() => {
+    const sessionTimer = window.setTimeout(() => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) setCashierName(JSON.parse(session).name)
+    }, 0)
+
+    const loadProducts = async () => {
+      await fetchActiveProducts()
+    }
+
+    loadProducts()
+
+    return () => window.clearTimeout(sessionTimer)
+  }, [])
 
   const mainProducts = products.filter(p => p.category === 'main')
   const retailProducts = products.filter(p => p.category === 'retail')
@@ -56,7 +130,7 @@ export default function POSPage() {
   const totalAmount = isFreeBill ? 0 : subTotal 
   const change = useMemo(() => { const r = Number(cashReceived); return r > totalAmount ? r - totalAmount : 0 }, [cashReceived, totalAmount])
 
-  const addToCart = (product: any) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
+  const addToCart = (product: Product) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
   const updateQty = (id: string, delta: number) => { setCart(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)) }
   const editPrice = (id: string, currentPrice: number) => { const n = window.prompt('ราคาใหม่:', currentPrice.toString()); if(n) setCart(prev => prev.map(i => i.id === id ? { ...i, price: Number(n) } : i)) }
   const addCustomRetailItem = () => { const p = window.prompt('ลูกค้าระบุซื้อกี่บาท?'); if(p) addToCart({ id: `CUSTOM-${Date.now()}`, name: `น้ำแข็งแบ่งขาย/ตัก (${p}บ.)`, category: 'retail', price: Number(p), unit: 'ถุง', icon: '🛍️', image: '', isActive: true, color: 'bg-orange-50' }) }
@@ -110,7 +184,7 @@ export default function POSPage() {
     window.location.href = `rawbt:base64,${btoa(binaryString)}`;
   }
 
-  const drawReceiptAndPrint = (billNo: string, dateStr: string, cashier: string, cartItems: any[], total: number, received: number, changeAmount: number) => {
+  const drawReceiptAndPrint = (billNo: string, dateStr: string, cashier: string, cartItems: CartItem[], total: number, received: number, changeAmount: number) => {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
@@ -159,7 +233,7 @@ export default function POSPage() {
   // 🚀 ข้อ 1: จัดการการพิมพ์แยกตาม Format (58mm ใช้ RawBT / A4 ใช้ระบบ Browser Print)
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
-    let finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
+    const finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
     if (paymentMethod === 'cash' && !isFreeBill && finalReceived < totalAmount) return alert('รับเงินมาไม่ครบ!')
 
     const billNo = `POS-${Date.now().toString().slice(-4)}`
@@ -308,21 +382,6 @@ export default function POSPage() {
     }
   }
 
-  const TabletNav = () => (
-    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
-      <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
-      <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
-        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
-        <Link href="/inventory" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
-        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
-      </div>
-      <div className="bg-white px-4 py-3 md:py-3.5 rounded-2xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs md:text-sm shrink-0 flex items-center gap-2">
-        <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-lg">👤</span>
-        <span className="hidden md:inline">พนักงาน:</span> {cashierName}
-      </div>
-    </div>
-  )
-
   return (
     <>
       <style dangerouslySetInnerHTML={{__html: `@media print { @page { size: ${closeShiftSlip || printFormat === '58mm' ? '58mm auto' : 'A4 portrait'}; margin: ${closeShiftSlip || printFormat === '58mm' ? '0' : '15mm'}; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; margin: 0; padding: 0;} }`}} />
@@ -332,7 +391,7 @@ export default function POSPage() {
         {/* === ด้านซ้าย === */}
         <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden relative">
           <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 shrink-0 gap-4">
-            <TabletNav />
+            <TabletNav pathname={pathname} cashierName={cashierName} />
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={() => { setPinInput(''); setIsPinModalOpen(true); }} className="bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-3 rounded-2xl font-bold border border-amber-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
                 🔓 <span className="hidden xl:inline">เปิดลิ้นชัก (Manual)</span>
@@ -350,8 +409,8 @@ export default function POSPage() {
           <div className="flex-1 overflow-y-auto pr-2 pb-24 md:pb-0 space-y-6">
              {isLoading ? (<div className="text-center py-20 font-bold text-lg text-slate-400">⏳ กำลังโหลดสินค้า...</div>) : (
                <>
-                 {mainProducts.length > 0 && (<div><h2 className="font-black text-slate-700 text-sm md:text-base mb-3">🧊 สินค้ากระสอบ และ แพ็ค</h2><div className="grid grid-cols-3 xl:grid-cols-4 gap-4">{mainProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="w-14 h-14 md:w-20 md:h-20 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><img src={product.image} className="w-full h-full object-cover" /></div>) : (<span className="text-4xl md:text-5xl mb-2 group-hover:scale-110 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center leading-tight mb-1">{product.name}</span><span className="font-black text-blue-600 text-lg">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>)}
-                 <div><h2 className="font-black text-orange-700 text-sm md:text-base mb-3 border-t border-slate-200 pt-5">🛍️ สินค้าแบ่งขายปลีก (ย่อย)</h2><div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"><button onClick={addCustomRetailItem} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-orange-50 border-orange-300 text-orange-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">⚖️</span><span className="font-bold text-sm text-center mb-1">น้ำแข็งตักขาย</span><span className="font-black text-orange-600 text-xs bg-orange-100 px-2 py-1 rounded">ระบุราคา ✏️</span></button>{retailProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="w-12 h-12 md:w-16 md:h-16 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><img src={product.image} className="w-full h-full object-cover" /></div>) : (<span className="text-4xl mb-2 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center mb-1">{product.name}</span><span className="font-black text-orange-600 text-base">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>
+                 {mainProducts.length > 0 && (<div><h2 className="font-black text-slate-700 text-sm md:text-base mb-3">🧊 สินค้ากระสอบ และ แพ็ค</h2><div className="grid grid-cols-3 xl:grid-cols-4 gap-4">{mainProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-14 h-14 md:w-20 md:h-20 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 80px, 56px" /> </div>) : (<span className="text-4xl md:text-5xl mb-2 group-hover:scale-110 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center leading-tight mb-1">{product.name}</span><span className="font-black text-blue-600 text-lg">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>)}
+                 <div><h2 className="font-black text-orange-700 text-sm md:text-base mb-3 border-t border-slate-200 pt-5">🛍️ สินค้าแบ่งขายปลีก (ย่อย)</h2><div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"><button onClick={addCustomRetailItem} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-orange-50 border-orange-300 text-orange-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">⚖️</span><span className="font-bold text-sm text-center mb-1">น้ำแข็งตักขาย</span><span className="font-black text-orange-600 text-xs bg-orange-100 px-2 py-1 rounded">ระบุราคา ✏️</span></button>{retailProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-12 h-12 md:w-16 md:h-16 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 64px, 48px" /> </div>) : (<span className="text-4xl mb-2 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center mb-1">{product.name}</span><span className="font-black text-orange-600 text-base">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>
                </>
              )}
           </div>
@@ -491,7 +550,7 @@ export default function POSPage() {
          <div className="hidden print:block text-black font-mono leading-tight w-[52mm] mx-auto p-0 pt-2"><div className="text-center mb-3 border-b-2 border-black pb-2"><h1 className="text-lg font-black font-sans">ใบนับเงินปิดกะ</h1><p className="text-[10px] mt-1 font-sans">คิงส์สว่าง (หน้าร้าน POS)</p></div><div className="text-[10px] space-y-1 font-sans mb-3"><p>พิมพ์: {closeShiftSlip.date}</p><p>ผู้ปิดกะ: {closeShiftSlip.by}</p><p>เลขที่: {closeShiftSlip.id}</p></div><div className="text-[11px] font-sans border-t border-b border-black py-2 mb-3 space-y-1"><div className="flex justify-between"><span>ยอดสแกนโอน:</span><span>{closeShiftSlip.transferAmount.toLocaleString()}</span></div><div className="flex justify-between font-bold text-[12px] mt-1"><span className="text-black">ยอดเงินสดในระบบ:</span><span>{closeShiftSlip.cashAmount.toLocaleString()}</span></div></div><div className="text-[13px] font-sans font-black space-y-1"><div className="flex justify-between border-b border-dashed border-black pb-1"><span>เงินสดที่นับได้:</span><span className="underline">{closeShiftSlip.actualCash.toLocaleString()}</span></div><div className="flex justify-between mt-1 text-[11px]"><span>ส่วนต่าง:</span><span>{closeShiftSlip.diff === 0 ? 'พอดี' : closeShiftSlip.diff > 0 ? `+${closeShiftSlip.diff.toLocaleString()}` : closeShiftSlip.diff.toLocaleString()}</span></div></div><div className="mt-6 border-t border-black text-center text-[10px] font-sans pt-2"><p>ลงชื่อแคชเชียร์ ......................</p></div></div>
       ) : printReceipt && !printReceipt.isManualKick && (
         <div className="hidden print:block text-black font-sans bg-white mx-auto" style={printFormat === '58mm' ? { width: '50mm', padding: '0 2mm', fontSize: '11px' } : { width: '100%', maxWidth: '800px', padding: '40px', fontSize: '14px' }}>
-          {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: any, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระเงินโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
+          {printFormat === 'A4' && (<><div className="flex justify-between items-start mb-8 border-b-4 border-black pb-6"><div><h1 className="text-3xl font-black mb-1">ใบเสร็จรับเงิน / Receipt</h1><p className="text-lg font-bold">คิงส์สว่าง โรงงานน้ำแข็งและน้ำดื่ม</p><p className="text-sm">อ.สว่างแดนดิน จ.สกลนคร</p></div><div className="text-right"><p className="font-bold text-lg">เลขที่: <span className="font-normal">{printReceipt.receiptNo}</span></p><p className="font-bold">วันที่: <span className="font-normal">{printReceipt.date}</span></p><p className="font-bold">พนักงานขาย: <span className="font-normal">{printReceipt.cashier}</span></p></div></div><table className="w-full border-collapse border-2 border-black text-base mb-8"><thead><tr className="bg-gray-100 border-b-2 border-black text-center"><th className="border-r border-black py-2 px-2 w-16">ลำดับ</th><th className="border-r border-black py-2 px-4 text-left">รายการสินค้า</th><th className="border-r border-black py-2 px-2 w-24">จำนวน</th><th className="border-r border-black py-2 px-2 w-32">ราคา/หน่วย</th><th className="py-2 px-4 w-40">จำนวนเงิน (บาท)</th></tr></thead><tbody>{printReceipt.items.map((item: ReceiptItem, idx: number) => (<tr key={idx} className="border-b border-gray-300"><td className="border-r border-black p-3 text-center">{idx + 1}</td><td className="border-r border-black p-3 font-bold">{item.name}</td><td className="border-r border-black p-3 text-center">{item.qty}</td><td className="border-r border-black p-3 text-right">{item.price.toLocaleString()}</td><td className="p-3 text-right font-black">{(item.qty * item.price).toLocaleString()}</td></tr>))}<tr className="border-t-2 border-black"><td colSpan={4} className="border-r border-black p-3 font-black text-right text-lg">ยอดรวมทั้งสิ้น</td><td className="p-3 text-right font-black text-2xl">{printReceipt.total.toLocaleString()}</td></tr></tbody></table><div className="w-80 ml-auto border-2 border-black p-4 rounded-xl space-y-2"><div className="flex justify-between font-bold"><span>ชำระเงินโดย:</span><span>{printReceipt.method}</span></div><div className="flex justify-between font-bold"><span>รับเงินมา:</span><span>{printReceipt.received.toLocaleString()} บาท</span></div><div className="flex justify-between font-black text-rose-600 border-t border-gray-300 pt-2 mt-2"><span>เงินทอน:</span><span>{printReceipt.change.toLocaleString()} บาท</span></div></div></>)}
         </div>
       )}
 

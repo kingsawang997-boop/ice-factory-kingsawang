@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -21,6 +22,9 @@ export default function LoginPage() {
         .eq('id', 'system_config')
         .single()
         
+      if (error) {
+        console.warn('App settings load error:', error.message)
+      }
       if (data && data.app_logo) {
         setAppLogo(data.app_logo)
       }
@@ -28,7 +32,7 @@ export default function LoginPage() {
     fetchSystemSettings()
   }, [])
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoading(true)
     setErrorMsg('')
@@ -42,7 +46,7 @@ export default function LoginPage() {
       .single()
 
     if (error || !user) {
-      setErrorMsg('❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง')
+      setErrorMsg(error?.message ?? '❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง')
       setIsLoading(false)
       return
     }
@@ -79,7 +83,14 @@ export default function LoginPage() {
           {/* 🌟 แสดงโลโก้ (ถ้ามีรูปจาก DB จะโชว์รูป ถ้าไม่มีจะโชว์ไอคอนน้ำแข็ง) */}
           <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-blue-600 rounded-[2rem] mx-auto flex items-center justify-center text-5xl shadow-lg shadow-blue-500/30 mb-4 transform -rotate-6 overflow-hidden border-4 border-white/10">
             {appLogo ? (
-              <img src={appLogo} alt="Logo" className="w-full h-full object-cover transform rotate-6" />
+              <Image
+                src={appLogo}
+                alt="KingSawang Logo"
+                width={96}
+                height={96}
+                unoptimized
+                className="w-full h-full object-cover transform rotate-6"
+              />
             ) : (
               '🧊'
             )}

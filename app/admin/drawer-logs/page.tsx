@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function DrawerLogsPage() {
@@ -9,17 +9,13 @@ export default function DrawerLogsPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  const [logs, setLogs] = useState<any[]>([])
+  type Log = { id: string; employee_name?: string; role?: string; print_status?: string; createdAt?: string }
+  const [logs, setLogs] = useState<Log[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [filterDate, setFilterDate] = useState(getTodayString())
-
-  useEffect(() => {
-    fetchLogs()
-  }, [filterDate])
-
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setIsLoading(true)
-    
+
     // ดึงข้อมูลตามวันที่เลือก (เวลาเริ่มวัน ถึง สิ้นวัน)
     const startOfDay = new Date(`${filterDate}T00:00:00+07:00`).toISOString()
     const endOfDay = new Date(`${filterDate}T23:59:59+07:00`).toISOString()
@@ -32,10 +28,15 @@ export default function DrawerLogsPage() {
       .order('createdAt', { ascending: false }) // ล่าสุดอยู่บนสุด
 
     if (!error && data) {
-      setLogs(data)
+      setLogs(data as Log[])
     }
     setIsLoading(false)
-  }
+  }, [filterDate])
+
+  useEffect(() => {
+    const load = async () => { await fetchLogs() }
+    void load()
+  }, [fetchLogs])
 
   // ฟังก์ชันจัดสีป้ายสถานะตามรูปภาพเป๊ะๆ
   const getStatusBadge = (status: string) => {

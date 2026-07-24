@@ -3,20 +3,59 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
+type CoolerTransaction = {
+  id: string
+  borrow_date: string
+  customer_name: string
+  cooler_type: string
+  qty_borrowed: number
+  qty_returned: number
+  deposit_amount: number
+  note?: string
+  status: 'pending' | 'returned'
+  recorded_by?: string
+}
+
+type CoolerStock = {
+  id: string
+  cooler_type: string
+  total_qty: number
+}
+
+type BorrowFormData = {
+  customer_name: string
+  cooler_type: string
+  qty_borrowed: number
+  deposit_amount: number
+  note: string
+}
+
+type ReturnPayload = {
+  qty_returned: number
+  status: 'pending' | 'returned'
+  return_date?: string
+}
+
+const generateCoolerTransactionId = () => `CLR-${String(Date.now()).slice(-6)}`
+
 export default function CoolersPage() {
-  const [transactions, setTransactions] = useState<any[]>([])
-  const [coolerStocks, setCoolerStocks] = useState<any[]>([])
+  const [transactions, setTransactions] = useState<CoolerTransaction[]>([])
+  const [coolerStocks, setCoolerStocks] = useState<CoolerStock[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'pending' | 'returned'>('pending')
-  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
+  const [employeeName] = useState(() => {
+    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
+    const session = localStorage.getItem('kingsawang_session')
+    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
+  })
+  const [selectedTx, setSelectedTx] = useState<CoolerTransaction | null>(null)
 
   // Modal States
   const [isBorrowModalOpen, setIsBorrowModalOpen] = useState(false)
   const [isReturnModalOpen, setIsReturnModalOpen] = useState(false)
-  const [selectedTx, setSelectedTx] = useState<any>(null)
   
   // Form States
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<BorrowFormData>({
     customer_name: '',
     cooler_type: '',
     qty_borrowed: 1,
@@ -24,12 +63,6 @@ export default function CoolersPage() {
     note: ''
   })
   const [returnQty, setReturnQty] = useState<number>(1)
-
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    fetchData()
-  }, [])
 
   const fetchData = async () => {
     setIsLoading(true)
@@ -47,6 +80,13 @@ export default function CoolersPage() {
     }
     setIsLoading(false)
   }
+
+  useEffect(() => {
+    const load = async () => {
+      await fetchData()
+    }
+    load()
+  }, [])
 
   // 🔄 คำนวณสรุปยอดสต๊อกถังแต่ละประเภท
   const stockSummary = coolerStocks.map(stock => {
@@ -82,7 +122,7 @@ export default function CoolersPage() {
       return alert(`❌ ไม่สามารถให้ยืมได้! ถังว่างมีเหลือแค่ ${stockInfo.available} ใบ เท่านั้น`)
     }
 
-    const newId = `CLR-${Date.now().toString().slice(-6)}`
+    const newId = generateCoolerTransactionId()
     const payload = {
       id: newId,
       customer_name: formData.customer_name,
@@ -113,8 +153,8 @@ export default function CoolersPage() {
     const newReturnedQty = selectedTx.qty_returned + Number(returnQty)
     if (newReturnedQty > selectedTx.qty_borrowed) return alert('จำนวนที่คืนมากกว่าจำนวนที่ค้างอยู่!')
 
-    const newStatus = newReturnedQty === selectedTx.qty_borrowed ? 'returned' : 'pending'
-    const payload: any = { qty_returned: newReturnedQty, status: newStatus }
+    const newStatus: 'pending' | 'returned' = newReturnedQty === selectedTx.qty_borrowed ? 'returned' : 'pending'
+    const payload: ReturnPayload = { qty_returned: newReturnedQty, status: newStatus }
     
     if (newStatus === 'returned') payload.return_date = new Date().toISOString()
 

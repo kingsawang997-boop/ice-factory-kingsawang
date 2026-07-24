@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<any[]>([])
+  type Product = { id: string; name: string; category: string; price: number; unit?: string; icon?: string; image?: string; isActive?: boolean }
+  const [products, setProducts] = useState<Product[]>([])
   const [activeFilter, setActiveFilter] = useState('all') 
   const [isLoading, setIsLoading] = useState(true) 
   
@@ -17,31 +18,13 @@ export default function AdminProductsPage() {
     name: '', category: 'main', price: 0, unit: 'กระสอบ', icon: '📦', image: '', isActive: true
   })
 
-  useEffect(() => {
-    fetchProducts()
-  }, [])
-
-  const fetchProducts = async () => {
-    setIsLoading(true)
-    const { data, error } = await supabase.from('products').select('*').order('id', { ascending: true })
-    
-    if (error) {
-      console.error('Error fetching products:', error)
-    } else {
-      setProducts(data || [])
-    }
-    setIsLoading(false)
-  }
-
-  const filteredProducts = products.filter(p => activeFilter === 'all' || p.category === activeFilter)
-
   const handleAddNew = () => {
     setEditingId(null)
     setFormData({ name: '', category: 'main', price: 0, unit: 'กระสอบ', icon: '📦', image: '', isActive: true })
     setIsModalOpen(true)
   }
 
-  const handleEdit = (product: any) => {
+  const handleEdit = (product: Product) => {
     setEditingId(product.id)
     setFormData({ 
       name: product.name, 
@@ -54,6 +37,20 @@ export default function AdminProductsPage() {
     })
     setIsModalOpen(true)
   }
+
+  const fetchProducts = useCallback(async () => {
+    setIsLoading(true)
+    const { data, error } = await supabase.from('products').select('*').order('id', { ascending: true })
+    
+    if (error) {
+      console.error('Error fetching products:', error)
+    } else {
+      setProducts(data || [])
+    }
+    setIsLoading(false)
+  }, [])
+
+  useEffect(() => { const load = async () => { await fetchProducts() }; void load() }, [fetchProducts])
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]

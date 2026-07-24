@@ -11,16 +11,6 @@ export default function DashboardPage() {
   // 🌟 State สำหรับเก็บชื่อคนล็อกอิน
   const [currentUser, setCurrentUser] = useState({ name: 'กำลังโหลด...', role: '' })
 
-  useEffect(() => {
-    // 🌟 ดึงข้อมูลจาก Session
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) {
-      const userData = JSON.parse(session)
-      setCurrentUser({ name: userData.name, role: userData.role })
-    }
-    fetchDashboardStats()
-  }, [])
-  
   const fetchDashboardStats = async () => {
     setIsLoading(true)
     const today = new Date()
@@ -51,6 +41,24 @@ export default function DashboardPage() {
     }
     setIsLoading(false)
   }
+
+  useEffect(() => {
+    const sessionTimer = window.setTimeout(() => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) {
+        const userData = JSON.parse(session)
+        setCurrentUser({ name: userData.name, role: userData.role })
+      }
+    }, 0)
+
+    const loadStats = async () => {
+      await fetchDashboardStats()
+    }
+
+    loadStats()
+
+    return () => window.clearTimeout(sessionTimer)
+  }, [])
 
   // ข้อมูลเมนูทางลัด (Quick Links)
   const quickMenus = [

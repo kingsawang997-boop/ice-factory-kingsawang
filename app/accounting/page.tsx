@@ -99,7 +99,7 @@ export default function AccountingDashboardPage() {
 
       // --- 📊 ดึงข้อมูลสัดส่วนรายได้ และผูกข้อมูลไส้ในสำหรับ Popup ---
       const colors = ['bg-emerald-500', 'bg-blue-500', 'bg-sky-500', 'bg-indigo-500', 'bg-purple-500']
-      let sources = []
+      const sources = []
       
       sources.push({
         id: 'POS', name: 'ขายด่วนหน้าร้าน (POS)', 
@@ -132,7 +132,7 @@ export default function AccountingDashboardPage() {
       setDailyArrears(arrears)
 
       // 📝 เรียงสมุดบัญชี (Ledger) รวมทุก Activity
-      let txs: any[] = []
+      const txs: any[] = []
       
       sales.forEach(s => txs.push({ 
         id: `S-${s.id}`, 

@@ -1,10 +1,18 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState<any[]>([])
+  type ExpenseRecord = {
+    id: string
+    amount: number
+    category: string
+    note: string
+    recorded_by: string
+    created_at: string
+  }
+  const [expenses, setExpenses] = useState<ExpenseRecord[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [employeeName, setEmployeeName] = useState('พนักงานบัญชี')
 
@@ -21,27 +29,31 @@ export default function ExpensesPage() {
     expenseDate: currentDate.toISOString().split('T')[0] // ค่าเริ่มต้นคือวันนี้ (YYYY-MM-DD)
   })
 
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    fetchExpenses()
-  }, [selectedMonth, selectedYear])
-
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     setIsLoading(true)
     const startDate = new Date(selectedYear, selectedMonth, 1).toLocaleDateString('en-CA')
     const endDate = new Date(selectedYear, selectedMonth + 1, 0).toLocaleDateString('en-CA')
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('expenses')
       .select('*')
       .gte('created_at', `${startDate}T00:00:00+07:00`)
       .lte('created_at', `${endDate}T23:59:59+07:00`)
       .order('created_at', { ascending: false })
 
-    if (data) setExpenses(data)
+    if (data) setExpenses(data as ExpenseRecord[])
     setIsLoading(false)
-  }
+  }, [selectedMonth, selectedYear])
+
+  useEffect(() => {
+    const loadExpenses = async () => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) setEmployeeName(JSON.parse(session).name)
+      await fetchExpenses()
+    }
+
+    void loadExpenses()
+  }, [fetchExpenses])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

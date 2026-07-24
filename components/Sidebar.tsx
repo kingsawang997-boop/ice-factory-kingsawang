@@ -2,30 +2,46 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
+
+function SectionTitle({ title }: { title: string }) {
+  return (
+    <div className="flex items-center gap-3 px-3 mt-8 mb-3 first:mt-2">
+      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 shrink-0">
+        {title}
+      </h3>
+      <div className="h-px bg-slate-800/60 w-full rounded-full"></div>
+    </div>
+  )
+}
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
   const isActive = (path: string) => pathname === path
 
   const [userRole, setUserRole] = useState('')
   const [isMounted, setIsMounted] = useState(false)
 
   useEffect(() => {
-    setIsMounted(true)
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) {
-      try {
-        const userData = JSON.parse(session)
-        setUserRole(String(userData.role || '').trim())
-      } catch (err) {
-        console.error('Session Error:', err)
+    const hydrateUser = () => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) {
+        try {
+          const userData = JSON.parse(session)
+          setUserRole(String(userData.role || '').trim())
+        } catch (err) {
+          console.error('Session Error:', err)
+          setUserRole('')
+        }
+      } else {
+        setUserRole('')
       }
-    } else {
-      setUserRole('')
+      setIsMounted(true)
     }
-  }, [pathname])
+
+    const timeoutId = window.setTimeout(hydrateUser, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [])
 
   const handleLogout = () => {
     if (confirm('คุณต้องการออกจากระบบ ใช่หรือไม่?')) {
@@ -55,16 +71,6 @@ export default function Sidebar() {
         ? 'border-blue-500 text-blue-400 font-bold bg-gradient-to-r from-blue-500/10 to-transparent rounded-r-xl' 
         : 'border-slate-800 text-slate-500 hover:border-slate-600 hover:text-slate-300'
     }`
-
-  // 🌟 Pro Style: หัวข้อหมวดหมู่พร้อมเส้นคั่น
-  const SectionTitle = ({ title }: { title: string }) => (
-    <div className="flex items-center gap-3 px-3 mt-8 mb-3 first:mt-2">
-      <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-500 shrink-0">
-        {title}
-      </h3>
-      <div className="h-px bg-slate-800/60 w-full rounded-full"></div>
-    </div>
-  )
 
   return (
     <aside className="w-[260px] bg-[#070b14] border-r border-slate-800/80 h-screen sticky top-0 flex flex-col shrink-0 print:hidden z-50 shadow-[4px_0_24px_rgba(0,0,0,0.2)]">

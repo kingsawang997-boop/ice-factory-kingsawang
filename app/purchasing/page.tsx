@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
+const createPurchaseOrderId = () => `PO-${Date.now().toString().slice(-6)}`
+
 export default function PurchaseOrderPage() {
   const getTodayString = () => {
     const today = new Date()
@@ -10,11 +12,46 @@ export default function PurchaseOrderPage() {
   }
 
   const [activeTab, setActiveTab] = useState<'create' | 'history'>('create')
-  const [poList, setPoList] = useState<any[]>([])
+  type Supplier = {
+    id: string
+    name: string
+    address?: string
+    phone?: string
+    taxId?: string
+  }
+
+  type PurchaseOrderItem = {
+    name: string
+    qty: number
+    unit: string
+    price: number
+    total: number
+  }
+
+  type PurchaseOrder = {
+    id: string
+    date: string
+    supplierName: string
+    totalAmount: number
+    status: string
+    items: PurchaseOrderItem[]
+    note: string
+    by: string
+  }
+
+  type PurchaseSlip = PurchaseOrder & {
+    supplierDetails: {
+      address: string
+      phone: string
+      taxId: string
+    } | null
+  }
+
+  const [poList, setPoList] = useState<PurchaseOrder[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [employeeName, setEmployeeName] = useState('ฝ่ายจัดซื้อ')
 
-  const [dbSuppliers, setDbSuppliers] = useState<any[]>([])
+  const [dbSuppliers, setDbSuppliers] = useState<Supplier[]>([])
 
   const [poDate, setPoDate] = useState(getTodayString())
   const [selectedSupplier, setSelectedSupplier] = useState('')
@@ -24,23 +61,13 @@ export default function PurchaseOrderPage() {
   const [poItems, setPoItems] = useState<{name: string, qty: number, unit: string, price: number, total: number}[]>([])
   const [currentItem, setCurrentItem] = useState({ name: '', qty: 1, unit: 'ชิ้น', price: 0 })
 
-  const [printSlip, setPrintSlip] = useState<any>(null)
-
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    fetchSuppliers() 
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'history') fetchPOs()
-  }, [activeTab])
+  const [printSlip, setPrintSlip] = useState<PurchaseSlip | null>(null)
 
   const fetchSuppliers = async () => {
     const { data, error } = await supabase.from('suppliers').select('*').order('name', { ascending: true })
     if (!error && data) {
       setDbSuppliers(data)
-      if (data.length > 0) setSelectedSupplier(data[0].name) 
+      if (data.length > 0) setSelectedSupplier(data[0].name)
       else setSelectedSupplier('อื่นๆ (ระบุเอง)')
     }
   }
@@ -51,6 +78,24 @@ export default function PurchaseOrderPage() {
     if (!error && data) setPoList(data)
     setIsLoading(false)
   }
+
+  useEffect(() => {
+    const sessionTimer = window.setTimeout(() => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) setEmployeeName(JSON.parse(session).name)
+      fetchSuppliers()
+    }, 0)
+
+    return () => window.clearTimeout(sessionTimer)
+  }, [])
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (activeTab === 'history') await fetchPOs()
+    }
+
+    loadHistory()
+  }, [activeTab])
 
   const handleAddItem = (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,7 +120,7 @@ export default function PurchaseOrderPage() {
     if (!supplierName) return alert('กรุณาระบุชื่อผู้จำหน่าย (Supplier)')
 
     const matchedSupplier = dbSuppliers.find(s => s.name === supplierName)
-    const poNo = `PO-${Date.now().toString().slice(-6)}`
+    const poNo = createPurchaseOrderId()
 
     const dbPayload = {
       id: poNo,
@@ -113,7 +158,7 @@ export default function PurchaseOrderPage() {
   }
 
   // 🌟 จุดเปลี่ยน: แค่อัปเดตสถานะก็พอ ไม่ต้องไปยุ่งกับรายจ่ายรายวัน
-  const handleUpdateStatus = async (po: any, newStatus: string) => {
+  const handleUpdateStatus = async (po: PurchaseOrder, newStatus: string) => {
     if (!confirm(`ต้องการเปลี่ยนสถานะเป็น "${newStatus === 'received' ? 'รับของแล้ว' : 'ยกเลิก'}" ใช่หรือไม่?`)) return
     
     await supabase.from('purchase_orders').update({ status: newStatus }).eq('id', po.id)
@@ -124,7 +169,7 @@ export default function PurchaseOrderPage() {
     fetchPOs()
   }
 
-  const handlePrintPO = (po: any) => {
+  const handlePrintPO = (po: PurchaseOrder) => {
     const matchedSupplier = dbSuppliers.find(s => s.name === po.supplierName)
     setPrintSlip({
       ...po,
@@ -367,7 +412,7 @@ export default function PurchaseOrderPage() {
               </tr>
             </thead>
             <tbody>
-              {printSlip.items && printSlip.items.map((item: any, idx: number) => (
+              {printSlip.items?.map((item, idx) => (
                 <tr key={idx} className="border-b border-gray-300">
                   <td className="border-r border-black p-3 text-center text-gray-600">{idx + 1}</td>
                   <td className="border-r border-black p-3 font-bold">{item.name}</td>

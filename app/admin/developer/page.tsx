@@ -17,8 +17,37 @@ export default function DeveloperPortalPage() {
   })
   const [dbStats, setDbStats] = useState({ sales: 0, products: 0, employees: 0, pos_logs: 0 })
 
+  const verifyDevAccess = async () => {
+    const sessionStr = localStorage.getItem('kingsawang_session')
+    
+    // ชั้นที่ 1: เช็คว่ามีการล็อกอินไหม
+    if (!sessionStr) {
+      alert('⛔ ไม่อนุญาตให้เข้าถึง: กรุณาล็อกอิน')
+      return router.push('/login')
+    }
+
+    const session = JSON.parse(sessionStr)
+
+    // ชั้นที่ 2: เช็คกับ Database ยืนยันว่าเป็น Dev ของแท้ (ป้องกันการแฮกแก้ไข LocalStorage)
+    const { data: user, error } = await supabase
+      .from('employees')
+      .select('role')
+      .eq('id', session.id)
+      .single()
+
+    if (error || !user || user.role !== 'ผู้พัฒนาโปรแกรม') {
+      alert('⛔ ภัยคุกคาม: คุณไม่มีสิทธิ์ระดับผู้พัฒนา (Developer) ในการเข้าถึงหน้านี้')
+      return router.push('/') // เตะกลับหน้าแรก
+    }
+
+    // ผ่านทุกด่าน! อนุญาตให้แสดงหน้าต่างได้
+    setIsAuthorized(true)
+    fetchSettings()
+    fetchDatabaseStats()
+  }
+
   useEffect(() => {
-    verifyDevAccess() // 🛡️ เช็คสิทธิ์ก่อนโหลดหน้าต่าง
+    void verifyDevAccess()
   }, [])
 
   // 🛡️ ระบบรักษาความปลอดภัย 2 ชั้น (Double-Layer Security)

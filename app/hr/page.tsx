@@ -1,7 +1,51 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+
+type Employee = {
+  id: string
+  name: string
+  role: string
+  baseSalary: number
+}
+
+type PayrollDetails = {
+  grossAmount?: number
+  lostBags?: number
+  penaltyPerBag?: number
+  totalPenalty?: number
+}
+
+type PayrollRecord = {
+  id: string
+  date: string
+  employeeName: string
+  role?: string
+  type: string
+  amount: number
+  note?: string
+  details?: PayrollDetails
+  by?: string
+  createdAt?: string
+}
+
+type SalarySummary = {
+  empInfo?: Employee
+  month: string
+  baseSalary: number
+  totalTripFee: number
+  totalAdvance: number
+  totalPenaltyPaid: number
+  netSalary: number
+}
+
+type SalaryPrint = SalarySummary & {
+  id: string
+  datePrinted: string
+}
+
+type PrintSlip = PayrollRecord | SalaryPrint
 
 export default function PayrollPage() {
   const getTodayString = () => {
@@ -12,45 +56,12 @@ export default function PayrollPage() {
   const [activeTab, setActiveTab] = useState<'record' | 'salary' | 'history'>('record')
 
   // 🌟 State เก็บข้อมูลพนักงานจริงจาก Database
-  const [employeeList, setEmployeeList] = useState<any[]>([])
+  const [employeeList, setEmployeeList] = useState<Employee[]>([])
   const [isLoadingEmployees, setIsLoadingEmployees] = useState(true)
 
   const [hrName, setHrName] = useState('ฝ่ายบุคคล/บัญชี')
-  const [printSlip, setPrintSlip] = useState<any>(null)
+  const [printSlip, setPrintSlip] = useState<PrintSlip | null>(null)
   const [printType, setPrintType] = useState<'voucher' | 'payslip'>('voucher')
-
-  // ==========================================
-  // 🎯 ดึงข้อมูลพนักงานเมื่อเปิดหน้าเว็บ
-  // ==========================================
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) {
-      setHrName(JSON.parse(session).name)
-    }
-    fetchEmployees()
-  }, [])
-
-  const fetchEmployees = async () => {
-    setIsLoadingEmployees(true)
-    const { data } = await supabase
-      .from('employees')
-      .select('*')
-      .eq('isActive', true)
-      .order('name', { ascending: true })
-    
-    if (data && data.length > 0) {
-      const formattedEmployees = data.map(emp => ({
-        id: emp.id,
-        name: emp.name,
-        role: emp.role,
-        baseSalary: Number(emp.salary) || 0 
-      }))
-      setEmployeeList(formattedEmployees)
-      setFormData(prev => ({ ...prev, employeeName: formattedEmployees[0].name }))
-      setSalaryEmp(formattedEmployees[0].name)
-    }
-    setIsLoadingEmployees(false)
-  }
 
   // ==========================================
   // 🎯 TAB 1: บันทึกรายการประจำวัน
@@ -66,11 +77,7 @@ export default function PayrollPage() {
   const [lostBags, setLostBags] = useState(0)
   const [penaltyPerBag, setPenaltyPerBag] = useState(5)
 
-  useEffect(() => {
-    if (activeTab === 'record' && formData.employeeName) fetchLostBagsToday()
-  }, [currentDate, formData.employeeName, activeTab])
-
-  const fetchLostBagsToday = async () => {
+  const fetchLostBagsToday = useCallback(async () => {
     if (!formData.employeeName) return
     const { data } = await supabase.from('route_settlements')
       .select('details')
@@ -84,7 +91,16 @@ export default function PayrollPage() {
       })
     }
     setLostBags(totalLost)
-  }
+  }, [currentDate, formData.employeeName])
+
+  useEffect(() => {
+    const loadLostBags = async () => {
+      if (activeTab !== 'record' || !formData.employeeName) return
+      await fetchLostBagsToday()
+    }
+
+    void loadLostBags()
+  }, [activeTab, fetchLostBagsToday, formData.employeeName])
 
   const grossAmount = Number(formData.amount) || 0
   const totalPenalty = (formData.type === 'ค่าเที่ยว' && lostBags > 0) ? (lostBags * penaltyPerBag) : 0
@@ -131,16 +147,49 @@ export default function PayrollPage() {
   // ==========================================
   const [salaryMonth, setSalaryMonth] = useState(getTodayString().slice(0, 7))
   const [salaryEmp, setSalaryEmp] = useState('')
-  const [salaryData, setSalaryData] = useState<any>(null)
+  const [salaryData, setSalaryData] = useState<SalarySummary | null>(null)
   const [isCalculating, setIsCalculating] = useState(false)
 
   useEffect(() => {
-    if (activeTab === 'salary' && salaryEmp) calculateMonthlySalary()
-  }, [activeTab, salaryMonth, salaryEmp])
+    const loadEmployees = async () => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) {
+        setHrName(JSON.parse(session).name)
+      }
 
-  const calculateMonthlySalary = async () => {
+      setIsLoadingEmployees(true)
+      const { data } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('isActive', true)
+        .order('name', { ascending: true })
+
+      if (data && data.length > 0) {
+        const formattedEmployees = data.map(emp => ({
+          id: emp.id,
+          name: emp.name,
+          role: emp.role,
+          baseSalary: Number(emp.salary) || 0
+        }))
+        setEmployeeList(formattedEmployees)
+        setFormData(prev => ({ ...prev, employeeName: formattedEmployees[0].name }))
+        setSalaryEmp(formattedEmployees[0].name)
+      }
+
+      setIsLoadingEmployees(false)
+    }
+
+    void loadEmployees()
+  }, [])
+
+  const calculateMonthlySalary = useCallback(async () => {
+    if (!salaryEmp) {
+      setSalaryData(null)
+      return
+    }
+
     setIsCalculating(true)
-    const empInfo = employeeList.find(e => e.name === salaryEmp)
+    const empInfo = employeeList.find(emp => emp.name === salaryEmp)
     const startOfMonth = `${salaryMonth}-01`
     const endOfMonth = new Date(new Date(startOfMonth).setMonth(new Date(startOfMonth).getMonth() + 1)).toISOString().split('T')[0]
 
@@ -177,9 +226,19 @@ export default function PayrollPage() {
       netSalary: Math.max(0, netSalary)
     })
     setIsCalculating(false)
-  }
+  }, [employeeList, salaryEmp, salaryMonth])
+
+  useEffect(() => {
+    const loadSalary = async () => {
+      if (activeTab !== 'salary') return
+      await calculateMonthlySalary()
+    }
+
+    void loadSalary()
+  }, [activeTab, calculateMonthlySalary])
 
   const printPayslip = () => {
+    if (!salaryData) return
     setPrintType('payslip')
     setPrintSlip({
       id: `SLIP-${Date.now().toString().slice(-6)}`,
@@ -194,14 +253,10 @@ export default function PayrollPage() {
   // ==========================================
   const [historyMonth, setHistoryMonth] = useState(getTodayString().slice(0, 7))
   const [historyEmpFilter, setHistoryEmpFilter] = useState('ทั้งหมด')
-  const [historyRecords, setHistoryRecords] = useState<any[]>([])
+  const [historyRecords, setHistoryRecords] = useState<PayrollRecord[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory()
-  }, [activeTab, historyMonth, historyEmpFilter])
-
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     setIsLoadingHistory(true)
     const startOfMonth = `${historyMonth}-01`
     const endOfMonth = new Date(new Date(startOfMonth).setMonth(new Date(startOfMonth).getMonth() + 1)).toISOString().split('T')[0]
@@ -210,9 +265,18 @@ export default function PayrollPage() {
     if (historyEmpFilter !== 'ทั้งหมด') query = query.eq('employeeName', historyEmpFilter)
 
     const { data } = await query
-    if (data) setHistoryRecords(data)
+    if (data) setHistoryRecords(data as PayrollRecord[])
     setIsLoadingHistory(false)
-  }
+  }, [historyEmpFilter, historyMonth])
+
+  useEffect(() => {
+    const loadHistory = async () => {
+      if (activeTab !== 'history') return
+      await fetchHistory()
+    }
+
+    void loadHistory()
+  }, [activeTab, fetchHistory])
 
   const handleDelete = async (id: string) => {
     if (confirm(`⚠️ ต้องการลบรายการ ${id} ออกจากระบบถาวรหรือไม่?`)) {
@@ -221,7 +285,7 @@ export default function PayrollPage() {
     }
   }
 
-  const reprintVoucher = (record: any) => {
+  const reprintVoucher = (record: PayrollRecord) => {
     setPrintType('voucher')
     setPrintSlip(record)
     setTimeout(() => { window.print(); setTimeout(() => setPrintSlip(null), 500) }, 300)
@@ -256,13 +320,13 @@ export default function PayrollPage() {
             
             <div className="flex bg-slate-100/80 p-1.5 rounded-2xl w-full md:w-auto overflow-x-auto border border-slate-200/50">
               {[
-                { id: 'record', label: '📝 บันทึกรายการ', activeClass: 'bg-white text-blue-600 shadow-sm border-slate-200/50' },
-                { id: 'salary', label: '💰 สรุปเงินเดือน', activeClass: 'bg-white text-emerald-600 shadow-sm border-slate-200/50' },
-                { id: 'history', label: '🗂️ ประวัติย้อนหลัง', activeClass: 'bg-white text-slate-900 shadow-sm border-slate-200/50' }
+                { id: 'record' as const, label: '📝 บันทึกรายการ', activeClass: 'bg-white text-blue-600 shadow-sm border-slate-200/50' },
+                { id: 'salary' as const, label: '💰 สรุปเงินเดือน', activeClass: 'bg-white text-emerald-600 shadow-sm border-slate-200/50' },
+                { id: 'history' as const, label: '🗂️ ประวัติย้อนหลัง', activeClass: 'bg-white text-slate-900 shadow-sm border-slate-200/50' }
               ].map(tab => (
                 <button 
                   key={tab.id}
-                  onClick={() => setActiveTab(tab.id as any)} 
+                  onClick={() => setActiveTab(tab.id)} 
                   className={`shrink-0 px-6 py-3 rounded-xl font-bold text-sm transition-all duration-300 border border-transparent ${activeTab === tab.id ? tab.activeClass : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
                 >
                   {tab.label}

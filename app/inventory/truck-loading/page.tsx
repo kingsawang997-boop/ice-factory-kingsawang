@@ -1,9 +1,107 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, type ChangeEvent } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+
+type TabletNavProps = {
+  pathname: string
+  employeeName: string
+}
+
+type TruckProduct = {
+  id: string
+  name: string
+  price: number
+  stock?: number
+  image?: string
+  icon?: string
+}
+
+type TruckRoute = {
+  id: string
+  route_name: string
+  driver_name: string
+  license_plate?: string
+  isActive?: boolean
+}
+
+type TruckSettlementItem = {
+  productId?: string
+  id?: string
+  name: string
+  price?: number
+  qty?: number
+  loadedQty?: number
+  returnedQty?: number
+  damagedQty?: number
+}
+
+type TruckSettlementDetails = {
+  shift?: string
+  items?: TruckSettlementItem[]
+  loadedItems?: TruckSettlementItem[]
+  bagTracking?: {
+    loadedBags?: number
+    returnedBags?: number
+    lostBags?: number
+    returnedEmptyBags?: number
+    pendingBags?: number
+  }
+}
+
+type TruckSettlementRecord = {
+  id: string
+  date?: string
+  createdAt?: string
+  routeName?: string
+  driverName?: string
+  expectedAmount?: number
+  status?: 'pending' | 'completed'
+  note?: string
+  details?: TruckSettlementDetails
+  by?: string
+}
+
+type TruckCartItem = {
+  id: string
+  name: string
+  price: number
+  qty: number
+}
+
+type TruckPendingGroup = {
+  routeName: string
+  driverName?: string
+  records: TruckSettlementRecord[]
+}
+
+type TruckReturnItem = {
+  productId: string
+  name: string
+  price: number
+  loadedQty: number
+  returnedQty: number
+  damagedQty: number
+}
+
+function TabletNav({ pathname, employeeName }: TabletNavProps) {
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+      <Link href="/" className="bg-white p-3 md:p-3.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
+      <div className="flex bg-white rounded-xl p-1.5 border border-slate-200 shadow-sm shrink-0">
+        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายของขึ้นรถ</Link>
+        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 POS</Link>
+        <Link href="/inventory" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 เช็คคลังสินค้า</Link>
+      </div>
+      <div className="bg-white px-4 py-3 md:py-3 rounded-xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs shrink-0 flex items-center gap-2">
+        <span className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-sm">👤</span>{employeeName}
+      </div>
+    </div>
+  )
+}
 
 export default function TruckLoadingPage() {
   const getTodayString = () => {
@@ -12,49 +110,41 @@ export default function TruckLoadingPage() {
   }
 
   const [activeTab, setActiveTab] = useState<'form' | 'return' | 'history'>('form')
-  const [products, setProducts] = useState<any[]>([])
-  const [cart, setCart] = useState<any[]>([])
+  const [products, setProducts] = useState<TruckProduct[]>([])
+  const [cart, setCart] = useState<TruckCartItem[]>([])
   const pathname = usePathname()
 
   const [selectedRoute, setSelectedRoute] = useState('')
   const [selectedShift, setSelectedShift] = useState('')
   const [note, setNote] = useState('')
-  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
-  const [truckRoutes, setTruckRoutes] = useState<any[]>([])
+  const [employeeName] = useState(() => {
+    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
+    const session = localStorage.getItem('kingsawang_session')
+    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
+  })
+  const [truckRoutes, setTruckRoutes] = useState<TruckRoute[]>([])
 
   const [historyDate, setHistoryDate] = useState(getTodayString())
-  const [historyRecords, setHistoryRecords] = useState<any[]>([])
+  const [historyRecords, setHistoryRecords] = useState<TruckSettlementRecord[]>([])
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
 
-  const [pendingGroups, setPendingGroups] = useState<any[]>([])
+  const [pendingGroups, setPendingGroups] = useState<TruckPendingGroup[]>([])
   const [selectedRouteKey, setSelectedRouteKey] = useState('')
-  const [returnItems, setReturnItems] = useState<any[]>([])
+  const [returnItems, setReturnItems] = useState<TruckReturnItem[]>([])
   const [bagForm, setBagForm] = useState({ returnedEmptyBags: '', pendingBags: '', note: '' })
   const [isLoadingPending, setIsLoadingPending] = useState(false)
 
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    fetchProducts()
-    fetchTruckRoutes() 
-  }, [])
-
-  useEffect(() => {
-    if (activeTab === 'history') fetchHistory()
-    if (activeTab === 'return') fetchPendingRoutesGrouped()
-  }, [activeTab, historyDate])
-
-  const fetchProducts = async () => {
+  async function fetchProducts() {
     const { data } = await supabase.from('products').select('*').eq('category', 'main').eq('isActive', true).order('id')
     if (data) setProducts(data)
   }
 
-  const fetchTruckRoutes = async () => {
+  async function fetchTruckRoutes() {
     const { data } = await supabase.from('truck_routes').select('*').eq('isActive', true).order('id')
     if (data) setTruckRoutes(data)
   }
 
-  const fetchHistory = async () => {
+  const fetchHistory = useCallback(async () => {
     setIsLoadingHistory(true)
     const { data } = await supabase.from('route_settlements').select('*').eq('date', historyDate).order('createdAt', { ascending: false })
     if (data) {
@@ -62,16 +152,16 @@ export default function TruckLoadingPage() {
       setHistoryRecords(validRecords)
     }
     setIsLoadingHistory(false)
-  }
+  }, [historyDate])
 
-  const fetchPendingRoutesGrouped = async () => {
+  const fetchPendingRoutesGrouped = useCallback(async () => {
     setIsLoadingPending(true)
     const { data } = await supabase.from('route_settlements').select('*').eq('status', 'pending').order('createdAt', { ascending: true })
     
     if (data) {
-      const groupsMap: { [key: string]: any } = {}
-      data.forEach(record => {
-        const key = record.routeName
+      const groupsMap: Record<string, TruckPendingGroup> = {}
+      data.forEach((record: TruckSettlementRecord) => {
+        const key = record.routeName ?? 'ไม่ระบุ'
         if (!groupsMap[key]) {
           groupsMap[key] = {
             routeName: key,
@@ -84,9 +174,25 @@ export default function TruckLoadingPage() {
       setPendingGroups(Object.values(groupsMap))
     }
     setIsLoadingPending(false)
-  }
+  }, [])
 
-  const handleProductClick = (product: any) => {
+  useEffect(() => {
+    const loadInitial = async () => {
+      await fetchProducts()
+      await fetchTruckRoutes()
+    }
+    void loadInitial()
+  }, [])
+
+  useEffect(() => {
+    const loadTabData = async () => {
+      if (activeTab === 'history') await fetchHistory()
+      if (activeTab === 'return') await fetchPendingRoutesGrouped()
+    }
+    void loadTabData()
+  }, [activeTab, historyDate, fetchHistory, fetchPendingRoutesGrouped])
+
+  const handleProductClick = (product: TruckProduct) => {
     const qtyInput = window.prompt(`ระบุจำนวน "${product.name}" ที่ต้องการเบิกขึ้นรถ:`, '1')
     if (qtyInput === null) return 
     const qty = parseInt(qtyInput, 10)
@@ -95,7 +201,7 @@ export default function TruckLoadingPage() {
     setCart(prev => {
       const existing = prev.find(i => i.id === product.id)
       if (existing) return prev.map(i => i.id === product.id ? { ...i, qty: existing.qty + qty } : i)
-      return [...prev, { ...product, qty }]
+      return [...prev, { id: product.id, name: product.name, price: product.price, qty }]
     })
   }
 
@@ -115,7 +221,7 @@ export default function TruckLoadingPage() {
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0)
   const expectedTotalAmount = cart.reduce((sum, item) => sum + (item.price * item.qty), 0)
 
-  const handleRouteSelection = async (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleRouteSelection = async (e: ChangeEvent<HTMLSelectElement>) => {
     const selected = e.target.value
     if (!selected) { setSelectedRoute(''); return }
 
@@ -124,10 +230,10 @@ export default function TruckLoadingPage() {
 
     if (data && data.length > 0) {
       let alertMsg = `⚠️ แจ้งเตือน: สายส่ง "${selected}" มีการเบิกของไปแล้วในวันนี้!\n\n`
-      data.forEach(load => {
+      data.forEach((load: TruckSettlementRecord) => {
         const shift = load.details?.shift || 'ไม่ระบุรอบ'
-        const items = load.details?.items || load.details?.loadedItems || []
-        const itemText = items.map((i: any) => `- ${i.name} : ${i.loadedQty || i.qty} หน่วย`).join('\n')
+        const items = (load.details?.items || load.details?.loadedItems || []) as TruckSettlementItem[]
+        const itemText = items.map((i: TruckSettlementItem) => `- ${i.name} : ${i.loadedQty || i.qty} หน่วย`).join('\n')
         alertMsg += `[รายการเบิก ${shift}]\n${itemText}\n\n`
       })
       alertMsg += `คุณแน่ใจหรือไม่ ว่าต้องการเบิกสินค้า "เพิ่ม/ซ้ำ" ให้รถคันนี้อีกครั้ง?`
@@ -180,18 +286,18 @@ export default function TruckLoadingPage() {
     setCart([]); setSelectedRoute(''); setSelectedShift(''); setNote(''); fetchProducts()
   }
 
-  const handleCancelLoad = async (record: any) => {
+  const handleCancelLoad = async (record: TruckSettlementRecord) => {
     if (!confirm(`⚠️ คำเตือน: ต้องการยกเลิกบิลจ่ายรถเลขที่ ${record.id} ใช่หรือไม่?\n(สต๊อกจะถูกดึงกลับเข้าคลังอัตโนมัติ)`)) return
     await supabase.from('route_settlements').delete().eq('id', record.id)
 
     const items = record.details?.items || record.details?.loadedItems || []
-    const stockPromises = items.map(async (item: any) => {
+    const stockPromises = items.map(async (item: TruckSettlementItem) => {
        const productId = item.productId || item.id
        const { data: currentProd } = await supabase.from('products').select('stock').eq('id', productId).single()
        if (currentProd) return supabase.from('products').update({ stock: Number(currentProd.stock) + Number(item.loadedQty || item.qty) }).eq('id', productId)
     })
     
-    const logPromises = items.map((item: any) => supabase.from('inventory_logs').insert([{
+    const logPromises = items.map((item: TruckSettlementItem) => supabase.from('inventory_logs').insert([{
       id: `LOG-RET-${Date.now()}-${(item.productId || item.id).slice(-4)}`, productId: item.productId || item.id, productName: item.name, type: 'IN', qty: item.loadedQty || item.qty,
       note: `ยกเลิกบิลจ่ายรถ ${record.id} (คืนสต๊อก)`, by: employeeName
     }]))
@@ -201,14 +307,14 @@ export default function TruckLoadingPage() {
     fetchHistory(); fetchProducts()
   }
 
-  const handleSelectRouteGroup = (group: any) => {
+  const handleSelectRouteGroup = (group: TruckPendingGroup) => {
     setSelectedRouteKey(group.routeName)
-    const itemMap: { [productId: string]: any } = {}
-    group.records.forEach((rec: any) => {
+    const itemMap: Record<string, TruckReturnItem> = {}
+    group.records.forEach((rec: TruckSettlementRecord) => {
       const items = rec.details?.items || rec.details?.loadedItems || []
-      items.forEach((i: any) => {
-        const pId = i.productId || i.id
-        if (!itemMap[pId]) itemMap[pId] = { productId: pId, name: i.name, price: i.price, loadedQty: 0, returnedQty: 0, damagedQty: 0 }
+      items.forEach((i: TruckSettlementItem) => {
+        const pId = i.productId || i.id || ''
+        if (!itemMap[pId]) itemMap[pId] = { productId: pId, name: i.name, price: i.price || 0, loadedQty: 0, returnedQty: 0, damagedQty: 0 }
         itemMap[pId].loadedQty += Number(i.loadedQty || i.qty || 0)
       })
     })
@@ -220,7 +326,7 @@ export default function TruckLoadingPage() {
     const num = Math.max(0, parseInt(val) || 0)
     setReturnItems(prev => prev.map(item => {
       if (item.productId === productId) {
-        let updated = { ...item, [field]: num }
+        const updated = { ...item, [field]: num }
         if (updated.returnedQty + updated.damagedQty > updated.loadedQty) { alert('❌ จำนวนของที่คืน + ของเสีย มากกว่าจำนวนรวมที่เบิกไป!'); return item }
         return updated
       }
@@ -234,19 +340,20 @@ export default function TruckLoadingPage() {
     if (!group) return
     if (!confirm('ยืนยันบันทึกสินค้าเหลือกลับและคืนสต๊อก?\n(ข้อมูลจะถูกส่งต่อไปยังบัญชีเพื่อสรุปยอดเงิน)')) return
 
-    let trackingReturns = returnItems.map(i => ({...i}));
+    const trackingReturns = returnItems.map(i => ({...i}))
 
-    const updatePromises = group.records.map(async (record: any) => {
-      const newItems = (record.details?.items || record.details?.loadedItems || []).map((i: any) => {
-        const pId = i.productId || i.id;
+    const updatePromises = group.records.map(async (record: TruckSettlementRecord) => {
+      const newItems = (record.details?.items || record.details?.loadedItems || []).map((i: TruckSettlementItem) => {
+        const pId = i.productId || i.id || '';
         const globalReturnItem = trackingReturns.find(ri => ri.productId === pId);
         
-        let myReturn = 0; let myDamage = 0;
+        const myReturn = globalReturnItem ? Math.min(globalReturnItem.returnedQty, i.loadedQty || i.qty || 0) : 0
         if (globalReturnItem) {
-          myReturn = Math.min(globalReturnItem.returnedQty, i.loadedQty || i.qty || 0);
-          globalReturnItem.returnedQty -= myReturn;
-          myDamage = Math.min(globalReturnItem.damagedQty, (i.loadedQty || i.qty || 0) - myReturn);
-          globalReturnItem.damagedQty -= myDamage;
+          globalReturnItem.returnedQty -= myReturn
+        }
+        const myDamage = globalReturnItem ? Math.min(globalReturnItem.damagedQty, (i.loadedQty || i.qty || 0) - myReturn) : 0
+        if (globalReturnItem) {
+          globalReturnItem.damagedQty -= myDamage
         }
         return { ...i, returnedQty: myReturn, damagedQty: myDamage };
       });
@@ -283,24 +390,10 @@ export default function TruckLoadingPage() {
     setSelectedRouteKey(''); fetchPendingRoutesGrouped(); fetchProducts()
   }
 
-  const TabletNav = () => (
-    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
-      <Link href="/" className="bg-white p-3 md:p-3.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
-      <div className="flex bg-white rounded-xl p-1.5 border border-slate-200 shadow-sm shrink-0">
-        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายของขึ้นรถ</Link>
-        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 POS</Link>
-        <Link href="/inventory" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 เช็คคลังสินค้า</Link>
-      </div>
-      <div className="bg-white px-4 py-3 md:py-3 rounded-xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs shrink-0 flex items-center gap-2">
-        <span className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-sm">👤</span>{employeeName}
-      </div>
-    </div>
-  )
-
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-100 overflow-hidden text-xs md:text-sm font-sans">
       <div className="bg-white p-4 border-b border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 z-10">
-        <TabletNav />
+        <TabletNav pathname={pathname} employeeName={employeeName} />
         <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
           <button onClick={() => setActiveTab('form')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'form' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🚚 1. โหลดของขึ้นรถ</button>
           <button onClick={() => setActiveTab('return')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'return' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📦 2. รับของคืน (เคลียร์ยอด)</button>
@@ -317,7 +410,9 @@ export default function TruckLoadingPage() {
                 {products.map(product => (
                   <button key={product.id} onClick={() => handleProductClick(product)} className="flex flex-col items-center p-5 rounded-[2rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">
                     {product.image ? (
-                      <div className="w-16 h-16 md:w-20 md:h-20 mb-3 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white border border-slate-100"><img src={product.image} className="w-full h-full object-cover" /></div>
+                      <div className="w-16 h-16 md:w-20 md:h-20 mb-3 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white border border-slate-100">
+                        <Image src={product.image} alt={product.name} width={80} height={80} unoptimized className="w-full h-full object-cover" />
+                      </div>
                     ) : (<span className="text-5xl md:text-6xl mb-3 group-hover:scale-110 transition-transform">{product.icon}</span>)}
                     <span className="font-bold text-sm text-center leading-tight mb-2">{product.name}</span>
                     <span className={`font-black px-3 py-1 rounded-lg ${Number(product.stock) < 10 ? 'text-rose-600 bg-rose-50' : 'text-blue-600 bg-blue-50'}`}>คงเหลือ: {product.stock || 0}</span>
@@ -387,7 +482,7 @@ export default function TruckLoadingPage() {
                 <button key={group.routeName} onClick={() => handleSelectRouteGroup(group)} className={`w-full text-left p-4 rounded-2xl border-2 transition-all shadow-sm ${selectedRouteKey === group.routeName ? 'bg-blue-50 border-blue-500 ring-4 ring-blue-500/20' : 'bg-white border-slate-200 hover:border-blue-300'}`}>
                   <p className="font-black text-slate-800 text-sm mb-1">{group.routeName}</p>
                   <div className="text-[11px] font-bold text-slate-500 space-y-0.5 mt-2 pt-2 border-t border-slate-100">
-                    {group.records.map((rec: any, idx: number) => (<p key={idx} className="flex justify-between"><span>รอบ: {rec.details?.shift}</span><span className="text-blue-600">บิล: {rec.id.slice(-6)}</span></p>))}
+                    {group.records.map((rec: TruckSettlementRecord, idx: number) => (<p key={idx} className="flex justify-between"><span>รอบ: {rec.details?.shift}</span><span className="text-blue-600">บิล: {rec.id.slice(-6)}</span></p>))}
                   </div>
                 </button>
               ))}
@@ -468,7 +563,7 @@ export default function TruckLoadingPage() {
                           <td className="p-4"><p className="font-bold text-slate-800">{new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</p><p className="text-[10px] text-slate-400 mt-1">{record.id}</p></td>
                           <td className="p-4"><p className="font-black text-blue-700">{record.routeName}</p><p className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-bold w-fit mt-1">รอบ {record.details?.shift || '-'}</p></td>
                           <td className="p-4 text-center">{record.status === 'pending' ? (<span className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1 rounded-full font-bold text-[10px]">⏳ รอเคลียร์</span>) : (<span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px]">✅ เคลียร์แล้ว</span>)}</td>
-                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: any, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span> {i.returnedQty > 0 && <span className="text-orange-500">(คืน {i.returnedQty})</span>} {i.damagedQty > 0 && <span className="text-rose-500">(เสีย {i.damagedQty})</span>}</li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
+                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: TruckSettlementItem, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span> {i.returnedQty > 0 && <span className="text-orange-500">(คืน {i.returnedQty})</span>} {i.damagedQty > 0 && <span className="text-rose-500">(เสีย {i.damagedQty})</span>}</li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
                           <td className="p-4 text-center font-bold text-slate-600">{record.by}</td>
                           <td className="p-4 text-center">{record.status === 'pending' ? (<button onClick={() => handleCancelLoad(record)} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white font-bold text-[10px] rounded-lg transition-colors border border-rose-200 shadow-sm">✕ ยกเลิกบิล</button>) : (<span className="text-[10px] text-slate-300 font-bold">- ล็อก -</span>)}</td>
                         </tr>

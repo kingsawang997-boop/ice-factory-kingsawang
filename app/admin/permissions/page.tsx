@@ -4,7 +4,17 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function PermissionsPage() {
-  const [roles, setRoles] = useState<any[]>([])
+  type Role = {
+    role: string
+    menu_pos: boolean
+    menu_purchase: boolean
+    menu_inventory: boolean
+    menu_payroll: boolean
+    menu_accounting: boolean
+    menu_admin: boolean
+  }
+
+  const [roles, setRoles] = useState<Role[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -12,10 +22,6 @@ export default function PermissionsPage() {
   // Modal เพิ่มกลุ่มผู้ใช้ใหม่
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [newRoleName, setNewRoleName] = useState('')
-
-  useEffect(() => {
-    fetchPermissions()
-  }, [])
 
   // 🔄 ดึงข้อมูลสิทธิ์จาก Database
   const fetchPermissions = async () => {
@@ -33,9 +39,15 @@ export default function PermissionsPage() {
     setIsLoading(false)
   }
 
+  useEffect(() => {
+    void fetchPermissions()
+  }, [])
+
   // 🔀 ฟังก์ชันสลับสวิตช์ (Toggle) ใน State
-  const handleToggle = (rowIndex: number, field: string) => {
+  const handleToggle = (rowIndex: number, field: keyof Role) => {
     const updatedRoles = [...roles]
+    // Toggle boolean field
+    // @ts-expect-error dynamic key assignment for Role
     updatedRoles[rowIndex][field] = !updatedRoles[rowIndex][field]
     setRoles(updatedRoles)
   }
@@ -202,7 +214,7 @@ export default function PermissionsPage() {
           </table>
         </div>
         <div className="p-4 bg-slate-50 border-t border-slate-100 text-center">
-          <p className="text-xs text-slate-500 font-bold">💡 ข้อแนะนำ: เมื่อปรับสิทธิ์แล้ว ต้องกดปุ่ม "บันทึกการเปลี่ยนแปลง" ด้านบนขวาทุกครั้ง เพื่อให้ระบบจำค่าสิทธิ์ใหม่</p>
+          <p className="text-xs text-slate-500 font-bold">💡 ข้อแนะนำ: เมื่อปรับสิทธิ์แล้ว ต้องกดปุ่ม &quot;บันทึกการเปลี่ยนแปลง&quot; ด้านบนขวาทุกครั้ง เพื่อให้ระบบจำค่าสิทธิ์ใหม่</p>
         </div>
       </div>
 

@@ -3,42 +3,58 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 
+type TruckRoute = {
+  id: string
+  route_name: string
+  driver_name: string
+  license_plate: string
+  isActive: boolean
+}
+
+type Driver = {
+  name: string
+  role: string
+}
+
 export default function TruckManagementPage() {
-  const [routes, setRoutes] = useState<any[]>([])
-  const [drivers, setDrivers] = useState<any[]>([])
+  const [routes, setRoutes] = useState<TruckRoute[]>([])
+  const [drivers, setDrivers] = useState<Driver[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
 
   // ฟอร์มข้อมูลรถ
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<TruckRoute>({
     id: '', route_name: '', driver_name: '', license_plate: '', isActive: true
   })
   const [isEditing, setIsEditing] = useState(false)
 
-  useEffect(() => {
-    fetchRoutes()
-    fetchDrivers()
-  }, [])
-
   const fetchRoutes = async () => {
     setIsLoading(true)
     const { data } = await supabase.from('truck_routes').select('*').order('id', { ascending: true })
-    if (data) setRoutes(data)
+    if (data) setRoutes(data as TruckRoute[])
     setIsLoading(false)
   }
 
   const fetchDrivers = async () => {
     // 🌟 ดึงพนักงานทั้งหมดที่ Active ก่อน
     const { data } = await supabase.from('employees').select('name, role').eq('isActive', true)
-    
+
     if (data) {
-      // 🌟 กรองเอาเฉพาะคนที่มีคำว่า "ขับรถ" หรือ "สายส่ง" ในชื่อตำแหน่ง
-      const onlyDrivers = data.filter(emp => 
+      const onlyDrivers = (data as Driver[]).filter(emp => 
         emp.role.includes('ขับรถ') || emp.role.includes('สายส่ง')
       )
       setDrivers(onlyDrivers)
     }
   }
+
+  useEffect(() => {
+    const load = async () => {
+      await fetchRoutes()
+      await fetchDrivers()
+    }
+
+    void load()
+  }, [])
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -62,7 +78,7 @@ export default function TruckManagementPage() {
     setIsModalOpen(true)
   }
 
-  const openEditModal = (route: any) => {
+  const openEditModal = (route: TruckRoute) => {
     setFormData(route)
     setIsEditing(true)
     setIsModalOpen(true)

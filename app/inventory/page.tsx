@@ -1,39 +1,87 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
+type TabletNavProps = {
+  pathname: string
+  employeeName: string
+}
+
+type InventoryProduct = {
+  id: string
+  name: string
+  category: string
+  price: number
+  unit?: string
+  stock?: number
+  image?: string
+  icon?: string
+}
+
+type InventoryLog = {
+  id: string
+  date?: string
+  product_id: string
+  product_name: string
+  type: 'IN' | 'OUT'
+  qty: number
+  note?: string
+  by: string
+}
+
+type NumpadState = {
+  isOpen: boolean
+  type: 'IN' | 'OUT'
+  product: InventoryProduct | null
+  value: string
+  time: string
+}
+
+function TabletNav({ pathname, employeeName }: TabletNavProps) {
+  return (
+    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide shrink-0">
+      <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
+      <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
+        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
+        <Link href="/inventory" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
+        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
+      </div>
+      <div className="bg-white px-4 py-3 md:py-3.5 rounded-2xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs md:text-sm shrink-0 flex items-center gap-2">
+        <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-lg">👤</span><span className="hidden md:inline">พนักงาน:</span> {employeeName}
+      </div>
+    </div>
+  )
+}
+
 export default function InventoryCheckPage() {
-  const [products, setProducts] = useState<any[]>([])
-  const [logs, setLogs] = useState<any[]>([])
+  const [products, setProducts] = useState<InventoryProduct[]>([])
+  const [logs, setLogs] = useState<InventoryLog[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const pathname = usePathname()
-  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
+  const [employeeName] = useState(() => {
+    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
+    const session = localStorage.getItem('kingsawang_session')
+    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
+  })
 
   // 🌟 เพิ่ม State สำหรับเปิด/ปิดหน้าต่างประวัติ
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
 
   // 🌟 State สำหรับระบบ Numpad และ เวลาผลิต
-  const [numpad, setNumpad] = useState({
+  const [numpad, setNumpad] = useState<NumpadState>({
     isOpen: false,
-    type: 'IN' as 'IN' | 'OUT',
-    product: null as any,
+    type: 'IN',
+    product: null,
     value: '0',
     time: ''
   })
 
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) {
-      setEmployeeName(JSON.parse(session).name)
-    }
-    fetchInventory()
-  }, [])
-
-  const fetchInventory = async () => {
+  async function fetchInventory() {
     setIsLoading(true)
     const { data: prodData } = await supabase.from('products').select('*').eq('category', 'main').order('id')
     
@@ -45,8 +93,20 @@ export default function InventoryCheckPage() {
     setIsLoading(false)
   }
 
+  useEffect(() => {
+    const loadInventory = async () => {
+      setIsLoading(true)
+      const { data: prodData } = await supabase.from('products').select('*').eq('category', 'main').order('id')
+      const { data: logData } = await supabase.from('inventory_logs').select('*').order('date', { ascending: false }).limit(20)
+      if (prodData) setProducts(prodData)
+      if (logData) setLogs(logData)
+      setIsLoading(false)
+    }
+    void loadInventory()
+  }, [])
+
   // 🧮 ฟังก์ชันเปิด Numpad
-  const openNumpad = (product: any, type: 'IN' | 'OUT') => {
+  const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
     const now = new Date()
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     setNumpad({ isOpen: true, type, product, value: '0', time: currentTime })
@@ -93,26 +153,11 @@ export default function InventoryCheckPage() {
   const totalStock = products.reduce((sum, p) => sum + Number(p.stock || 0), 0)
   const lowStockCount = products.filter(p => Number(p.stock || 0) < 10).length
 
-  // 🌟 Component เมนู Tablet แบบเดียวกับหน้า POS
-  const TabletNav = () => (
-    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide shrink-0">
-      <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
-      <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
-        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
-        <Link href="/inventory" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
-        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
-      </div>
-      <div className="bg-white px-4 py-3 md:py-3.5 rounded-2xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs md:text-sm shrink-0 flex items-center gap-2">
-        <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-lg">👤</span><span className="hidden md:inline">พนักงาน:</span> {employeeName}
-      </div>
-    </div>
-  )
-
   return (
     <div className="fixed inset-0 z-[999] flex flex-col bg-slate-100 overflow-hidden text-xs md:text-sm font-sans">
       <div className="p-4 md:p-6 w-full max-w-7xl mx-auto flex flex-col h-full overflow-hidden">
         
-        <TabletNav />
+        <TabletNav pathname={pathname} employeeName={employeeName} />
 
         {/* 🌟 Dashboard Card */}
         <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 mt-6 shrink-0">
@@ -162,7 +207,16 @@ export default function InventoryCheckPage() {
                   {/* หัวการ์ด (รูป + หมวดหมู่) */}
                   <div className="flex justify-between items-start mb-3">
                     <div className="w-16 h-16 rounded-2xl bg-slate-50 flex items-center justify-center text-3xl border border-slate-100 overflow-hidden shadow-sm group-hover:scale-105 transition-transform">
-                      {p.image ? <img src={p.image} className="w-full h-full object-cover" /> : p.icon}
+                      {p.image ? (
+                        <Image
+                          src={p.image}
+                          alt={p.name}
+                          width={64}
+                          height={64}
+                          unoptimized
+                          className="w-full h-full object-cover"
+                        />
+                      ) : p.icon}
                     </div>
                     <span className="bg-slate-100 text-slate-500 px-2 py-1 rounded-lg text-[10px] font-bold border border-slate-200">
                       {p.category === 'main' ? 'กระสอบ' : 'ปลีก'}

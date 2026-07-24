@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
+// Link import removed — not used in this file
 import { supabase } from '@/lib/supabase'
 
 export default function RouteSettlementPage() {
@@ -12,7 +12,10 @@ export default function RouteSettlementPage() {
     return new Date(today.getTime() - (today.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
   }
 
-  const [truckRoutes, setTruckRoutes] = useState<any[]>([])
+  type TruckRoute = { id: string; route_name: string; driver_name?: string }
+  type Debtor = { id: string; name: string; outstanding?: number }
+  type DebtorItem = { productName: string; qty: number; price: number }
+  const [truckRoutes, setTruckRoutes] = useState<TruckRoute[]>([])
   const [selectedTruck, setSelectedTruck] = useState('')
   const [reportDate, setReportDate] = useState(getTodayString())
   const [isPullingData, setIsPullingData] = useState(false)
@@ -25,36 +28,23 @@ export default function RouteSettlementPage() {
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
 
   const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
-  const [debtorsList, setDebtorsList] = useState<any[]>([])
+  const [debtorsList, setDebtorsList] = useState<Debtor[]>([])
   const [tempDebtorId, setTempDebtorId] = useState('')
-  const [debtorItems, setDebtorItems] = useState<any[]>([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
+  const [debtorItems, setDebtorItems] = useState<DebtorItem[]>([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
   const [debtorDocNo, setDebtorDocNo] = useState('')
   const [selectedDebtorId, setSelectedDebtorId] = useState('')
   const [selectedDebtorName, setSelectedDebtorName] = useState('')
 
-  const [selectedDetailRecord, setSelectedDetailRecord] = useState<any>(null)
+  const [selectedDetailRecord, setSelectedDetailRecord] = useState<Record<string, unknown> | null>(null)
 
-  useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setCashierName(JSON.parse(session).name)
-    fetchLivePrices()
-    fetchTruckRoutes()
-  }, [])
+  
 
-  useEffect(() => {
-    if (selectedTruck) {
-      setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
-      setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
-      setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
-      setSelectedDebtorId(''); setSelectedDebtorName('')
-      fetchTruckLoadingData()
-    }
-  }, [selectedTruck, reportDate])
+  
 
-  const fetchLivePrices = async () => {
+  const fetchLivePrices = useCallback(async () => {
     const { data } = await supabase.from('products').select('name, price').eq('isActive', true)
     if (data) {
-      let newSettings = { ...adminSettings }
+      const newSettings = { icePrice1: 45, icePrice2: 40, icePrice3: 35, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 }
       data.forEach(p => {
         if (p.name.includes('แพ็ค') && p.name.includes('น้ำแข็ง')) newSettings.icePackPrice = Number(p.price)
         else if (p.name.includes('1500')) newSettings.waterPrice1500 = Number(p.price)
@@ -63,17 +53,24 @@ export default function RouteSettlementPage() {
       })
       setAdminSettings(newSettings)
     }
-  }
+  }, [])
 
-  const fetchTruckRoutes = async () => {
+  const fetchTruckRoutes = useCallback(async () => {
     const { data } = await supabase.from('truck_routes').select('*').eq('isActive', true).order('id')
     if (data) {
       setTruckRoutes(data)
-      if(data.length > 0 && !selectedTruck) setSelectedTruck(`${data[0].route_name} (คนขับ: ${data[0].driver_name})`)
+      if (data.length > 0) {
+        setSelectedTruck(prev => prev || `${data[0].route_name} (คนขับ: ${data[0].driver_name})`)
+      }
     }
-  }
+  }, [])
 
-  const fetchTruckLoadingData = async () => {
+  const fetchTruckLoadingData = useCallback(async () => {
+    // reset UI state before fetching
+    setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
+    setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
+    setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
+    setSelectedDebtorId(''); setSelectedDebtorName('')
     setIsPullingData(true)
     const { data } = await supabase.from('route_settlements').select('details').eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
 
@@ -83,12 +80,13 @@ export default function RouteSettlementPage() {
 
     if (data && data.length > 0) {
       data.forEach(record => {
-        const itemsList = record.details?.items || record.details?.loadedItems || []
-        itemsList.forEach((item: any) => {
-          const qty = Number(item.loadedQty || item.qty || 0)
-          const returned = Number(item.returnedQty || 0)
-          const damaged = Number(item.damagedQty || 0)
-          const name = item.name || ''
+          type LoadedItem = { loadedQty?: number; qty?: number; returnedQty?: number; damagedQty?: number; name?: string }
+          const itemsList: LoadedItem[] = record.details?.items || record.details?.loadedItems || []
+          itemsList.forEach((item: LoadedItem) => {
+            const qty = Number(item.loadedQty || item.qty || 0)
+            const returned = Number(item.returnedQty || 0)
+            const damaged = Number(item.damagedQty || 0)
+            const name = item.name || ''
           
           if (name.includes('แพ็ค') && name.includes('น้ำแข็ง')) { packs += qty; retPacks += (returned + damaged) }
           else if (name.includes('1500')) { w1500 += qty; ret1500 += (returned + damaged) }
@@ -109,7 +107,24 @@ export default function RouteSettlementPage() {
     setPackReturns({ icePacks: retPacks, water1500: ret1500, water600: ret600, water350: ret350 })
 
     setIsPullingData(false)
-  }
+  }, [selectedTruck, reportDate])
+
+  useEffect(() => {
+    const load = async () => {
+      const session = localStorage.getItem('kingsawang_session')
+      if (session) setCashierName(JSON.parse(session).name)
+      await fetchLivePrices()
+      await fetchTruckRoutes()
+    }
+    void load()
+  }, [fetchLivePrices, fetchTruckRoutes])
+
+  useEffect(() => {
+    if (selectedTruck) {
+      const load = async () => { await fetchTruckLoadingData() }
+      void load()
+    }
+  }, [selectedTruck, reportDate, fetchTruckLoadingData])
 
   const openDebtorModal = async () => {
     const { data } = await supabase.from('debtors').select('*').order('name')
@@ -118,9 +133,13 @@ export default function RouteSettlementPage() {
   }
 
   const addDebtorItemRow = () => setDebtorItems([...debtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
-  const updateDebtorItem = (index: number, field: string, value: any) => {
+  const updateDebtorItem = (index: number, field: keyof DebtorItem, value: string | number) => {
     const newItems = [...debtorItems]
-    newItems[index][field] = value
+    const item = { ...newItems[index] }
+    if (field === 'productName') item.productName = String(value)
+    else if (field === 'qty') item.qty = Number(value)
+    else if (field === 'price') item.price = Number(value)
+    newItems[index] = item
     setDebtorItems(newItems)
   }
   const removeDebtorItemRow = (index: number) => setDebtorItems(debtorItems.filter((_, idx) => idx !== index))
@@ -165,7 +184,7 @@ export default function RouteSettlementPage() {
   const cashDifference = finance.actualCash - expectedCash
 
   const updateIce = (field: keyof typeof iceData, value: string) => setIceData(prev => ({ ...prev, [field]: Number(value) }))
-  const updatePack = (field: keyof typeof packReturns, value: string) => setPackReturns(prev => ({ ...prev, [field]: Number(value) }))
+  // removed unused `updatePack` to satisfy lint rules
   const updateFinance = (field: keyof typeof finance, value: string) => setFinance(prev => ({ ...prev, [field]: Number(value) }))
   const exactCash = () => updateFinance('actualCash', expectedCash.toString())
 
@@ -230,20 +249,55 @@ export default function RouteSettlementPage() {
 
   // TAB 2: ประวัติ
   const [historyDate, setHistoryDate] = useState(getTodayString())
-  const [historyRecords, setHistoryRecords] = useState<any[]>([])
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
-  const [printSlip, setPrintSlip] = useState<any>(null)
+  type IceBreakdown = { sold45?: number; sold40?: number; sold35?: number; service?: number }
+  type PackBreakdown = { icePacks?: number; water1500?: number; water600?: number; water350?: number }
+  type DebtorDetailsPrint = { debtorName?: string; docNo?: string; items?: { productName?: string; qty?: number; price?: number }[]; total?: number }
+  type BagTracking = { grossLoad?: number; netLoad?: number; returnedToStock?: number; melted?: number; soldAndService?: number; customerOwe?: number; customerReturnOld?: number; expectedReturn?: number; actualReturn?: number; lostBagsToDeduct?: number }
+  type RevenueSummary = { iceSales?: number; packSales?: number; total?: number }
+  type CashSummary = { expected?: number; actual?: number; diff?: number }
 
-  useEffect(() => { if (activeTab === 'history') fetchHistory() }, [activeTab, historyDate])
-
-  const fetchHistory = async () => {
-    setIsLoadingHistory(true)
-    const { data, error } = await supabase.from('route_settlements').select('*').eq('date', historyDate).eq('status', 'received').order('createdAt', { ascending: false })
-    if (!error && data) setHistoryRecords(data)
-    setIsLoadingHistory(false)
+  type SettlementDetails = {
+    date?: string
+    truck?: string
+    revenue?: RevenueSummary
+    bagTracking?: BagTracking
+    cash?: CashSummary
+    debtorDetails?: DebtorDetailsPrint | null
+    iceBreakdown?: IceBreakdown
+    packBreakdown?: PackBreakdown
+    [key: string]: any
   }
 
-  const handlePrint = (record: any) => { setPrintSlip(record); setTimeout(() => { window.print(); setTimeout(() => setPrintSlip(null), 500) }, 300) }
+  type SettlementRecord = {
+    id: string
+    date?: string
+    routeName?: string
+    details?: SettlementDetails | null
+    expectedAmount?: number
+    cashAmount?: number
+    transferAmount?: number
+    creditAmount?: number
+    expenseAmount?: number
+    diffAmount?: number
+    note?: string
+    by?: string
+    status?: string
+  }
+
+  const [historyRecords, setHistoryRecords] = useState<SettlementRecord[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [printSlip, setPrintSlip] = useState<SettlementRecord | null>(null)
+
+  const fetchHistory = useCallback(async () => {
+    setIsLoadingHistory(true)
+    const { data, error } = await supabase.from('route_settlements').select('*').eq('date', historyDate).eq('status', 'received').order('createdAt', { ascending: false })
+    if (!error && data) setHistoryRecords(data as SettlementRecord[])
+    setIsLoadingHistory(false)
+  }, [historyDate])
+
+  useEffect(() => { if (activeTab === 'history') { const load = async () => { await fetchHistory() }; void load() } }, [activeTab, historyDate, fetchHistory])
+
+  const handlePrint = (record: SettlementRecord) => { setPrintSlip(record); setTimeout(() => { window.print(); setTimeout(() => setPrintSlip(null), 500) }, 300) }
   const handleDelete = async (id: string) => {
     if(confirm(`⚠️ ต้องการลบบิล ${id} ออกจากระบบถาวรหรือไม่?`)) { await supabase.from('route_settlements').delete().eq('id', id); fetchHistory() }
   }

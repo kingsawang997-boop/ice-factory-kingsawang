@@ -1,11 +1,25 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 export default function EmployeesPage() {
-  const [employees, setEmployees] = useState<any[]>([])
-  const [roles, setRoles] = useState<any[]>([])
+  type Employee = {
+    id: string
+    name: string
+    role: string
+    base_salary?: number | null
+    phone?: string | null
+    username?: string | null
+    password?: string | null
+    pin?: string | null
+    isActive?: boolean
+  }
+
+  type Role = { role: string }
+
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -24,15 +38,9 @@ export default function EmployeesPage() {
     pin: ''
   })
 
-  useEffect(() => {
-    fetchEmployees()
-    fetchRoles()
-  }, [])
-
-  // 🔄 ดึงข้อมูลพนักงาน (🌟 อัปเดต: ซ่อน 'ผู้พัฒนาโปรแกรม' ออกจากตาราง 100%)
-  const fetchEmployees = async () => {
+  const fetchEmployees = useCallback(async () => {
     setIsLoading(true)
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from('employees')
       .select('*')
       .neq('role', 'ผู้พัฒนาโปรแกรม') // 🛡️ คำสั่งซ่อน Dev
@@ -41,10 +49,9 @@ export default function EmployeesPage() {
       
     if (data) setEmployees(data)
     setIsLoading(false)
-  }
+  }, [])
 
-  // 🔄 ดึงข้อมูลตำแหน่ง (🌟 อัปเดต: ซ่อน 'ผู้พัฒนาโปรแกรม' ไม่ให้เลือกสร้างได้)
-  const fetchRoles = async () => {
+  const fetchRoles = useCallback(async () => {
     const { data } = await supabase
       .from('role_permissions')
       .select('role')
@@ -55,7 +62,16 @@ export default function EmployeesPage() {
       setRoles(data)
       if (data.length > 0) setFormData(prev => ({ ...prev, role: data[0].role }))
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    const loadData = async () => {
+      await fetchEmployees()
+      await fetchRoles()
+    }
+
+    void loadData()
+  }, [fetchEmployees, fetchRoles])
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -91,7 +107,7 @@ export default function EmployeesPage() {
     }
   }
 
-  const openEditModal = (emp: any) => {
+  const openEditModal = (emp: Employee) => {
     setFormData({
       id: emp.id,
       name: emp.name,
@@ -308,7 +324,7 @@ export default function EmployeesPage() {
 
               <div className="space-y-1.5 border-t border-slate-100 pt-4 mt-2">
                 <label className="text-xs font-bold text-emerald-600">ฐานเงินเดือนตั้งต้น (บาท) <span className="text-rose-500">*</span></label>
-                <p className="text-[10px] text-slate-400 mb-2">ใช้สำหรับคำนวณในเมนู 'สรุปเงินเดือน/ค่าเที่ยว' (ถ้าไม่มีให้ใส่ 0)</p>
+                <p className="text-[10px] text-slate-400 mb-2">ใช้สำหรับคำนวณในเมนู &#39;สรุปเงินเดือน/ค่าเที่ยว&#39; (ถ้าไม่มีให้ใส่ 0)</p>
                 <input type="number" min="0" required value={formData.base_salary} onChange={e => setFormData({...formData, base_salary: e.target.value})} className="w-full border-2 border-emerald-200 px-4 py-3 rounded-xl font-black text-emerald-700 bg-emerald-50 focus:outline-none focus:border-emerald-500 text-xl" placeholder="0" />
               </div>
 

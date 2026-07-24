@@ -13,14 +13,13 @@ export default function SuppliersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({ name: '', phone: '', address: '', taxId: '', note: '' })
 
-  useEffect(() => { fetchSuppliers() }, [])
-
   const fetchSuppliers = async () => {
     setIsLoading(true)
     const { data, error } = await supabase.from('suppliers').select('*').order('createdAt', { ascending: false })
     if (!error) setSuppliers(data || [])
     setIsLoading(false)
   }
+  useEffect(() => { void fetchSuppliers() }, [])
 
   const filteredSuppliers = suppliers.filter(s => 
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
