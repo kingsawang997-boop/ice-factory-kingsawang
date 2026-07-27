@@ -65,7 +65,6 @@ type TruckSettlementRecord = {
   note?: string
   details?: TruckSettlementDetails
   by?: string
-  // 🌟 เพิ่มตัวแปรเหล่านี้เข้ามาเพื่อให้รองรับการเซฟลง Database ได้อย่างถูกต้อง
   cashAmount?: number
   transferAmount?: number
   creditAmount?: number
@@ -127,7 +126,6 @@ export default function TruckLoadingPage() {
   const [selectedShift, setSelectedShift] = useState('')
   const [note, setNote] = useState('')
   
-  // 🌟 แก้ไข Hydration Error: ปล่อยให้ว่างก่อน แล้วค่อยไปดึงจาก LocalStorage ทีหลัง
   const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
 
   const [truckRoutes, setTruckRoutes] = useState<TruckRoute[]>([])
@@ -185,7 +183,6 @@ export default function TruckLoadingPage() {
   }, [])
 
   useEffect(() => {
-    // 🌟 ดึง LocalStorage ตรงนี้เท่านั้น ฝั่ง Server จะได้ไม่งง
     const session = localStorage.getItem('kingsawang_session')
     if (session) {
       setEmployeeName(JSON.parse(session).name)
@@ -245,7 +242,6 @@ export default function TruckLoadingPage() {
     if (data && data.length > 0) {
       let alertMsg = `⚠️ แจ้งเตือน: สายส่ง "${selected}" มีการเบิกของไปแล้วในวันนี้!\n\n`
       
-      // 🌟 แก้ไข: เปลี่ยนจาก (load: TruckSettlementRecord) เป็น (load: any)
       data.forEach((load: any) => {
         const shift = load.details?.shift || 'ไม่ระบุรอบ'
         const items = (load.details?.items || load.details?.loadedItems || []) as TruckSettlementItem[]
@@ -293,9 +289,16 @@ export default function TruckLoadingPage() {
       return supabase.from('products').update({ stock: Number(currentProd?.stock || 0) - item.qty }).eq('id', item.id)
     })
 
+    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name ให้ตรงกับ Database
     const logPromises = cart.map(item => supabase.from('inventory_logs').insert([{
-      id: `LOG-${Date.now()}-${item.id.slice(-4)}`, productId: item.id, productName: item.name, type: 'OUT', qty: item.qty,
-      note: `จ่ายขึ้นรถ ${selectedRoute} (รอบ ${selectedShift})`, by: employeeName
+      id: `LOG-${Date.now()}-${item.id.slice(-4)}`, 
+      date: new Date().toISOString(),
+      product_id: item.id, 
+      product_name: item.name, 
+      type: 'OUT', 
+      qty: item.qty,
+      note: `จ่ายขึ้นรถ ${selectedRoute} (รอบ ${selectedShift})`, 
+      by: employeeName
     }]))
 
     await Promise.all([...stockPromises, ...logPromises])
@@ -314,9 +317,16 @@ export default function TruckLoadingPage() {
        if (currentProd) return supabase.from('products').update({ stock: Number(currentProd.stock) + Number(item.loadedQty || item.qty) }).eq('id', productId)
     })
     
+    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name
     const logPromises = items.map((item: TruckSettlementItem) => supabase.from('inventory_logs').insert([{
-      id: `LOG-RET-${Date.now()}-${(item.productId || item.id || '').slice(-4)}`, productId: item.productId || item.id, productName: item.name, type: 'IN', qty: item.loadedQty || item.qty,
-      note: `ยกเลิกบิลจ่ายรถ ${record.id} (คืนสต๊อก)`, by: employeeName
+      id: `LOG-RET-${Date.now()}-${(item.productId || item.id || '').slice(-4)}`, 
+      date: new Date().toISOString(),
+      product_id: item.productId || item.id, 
+      product_name: item.name, 
+      type: 'IN', 
+      qty: item.loadedQty || item.qty,
+      note: `ยกเลิกบิลจ่ายรถ ${record.id} (คืนสต๊อก)`, 
+      by: employeeName
     }]))
 
     await Promise.all([...stockPromises, ...logPromises])
@@ -389,20 +399,96 @@ export default function TruckLoadingPage() {
     
     await Promise.all(updatePromises)
 
-    const stockPromises = returnItems.filter(i => i.returnedQty > 0).map(async (item) => {
+    const stockPromises: any[] = returnItems.filter(i => i.returnedQty > 0).map(async (item) => {
       const { data: currentProd } = await supabase.from('products').select('stock').eq('id', item.productId).single()
       if (currentProd) return supabase.from('products').update({ stock: Number(currentProd.stock) + Number(item.returnedQty) }).eq('id', item.productId)
     })
 
-    const logPromises = returnItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
+    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name
+    const logPromises: any[] = returnItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
       const logs = []
-      if (item.returnedQty > 0) logs.push(supabase.from('inventory_logs').insert([{ id: `LOG-RET-${Date.now()}-${item.productId.slice(-4)}`, productId: item.productId, productName: item.name, type: 'IN', qty: item.returnedQty, note: `รับคืนจากรถ ${group.routeName} (เคลียร์ยอดรวม)`, by: employeeName }]))
-      if (item.damagedQty > 0) logs.push(supabase.from('inventory_logs').insert([{ id: `LOG-DMG-${Date.now()}-${item.productId.slice(-4)}`, productId: item.productId, productName: item.name, type: 'OUT', qty: item.damagedQty, note: `ของเสีย/ละลาย (รถ ${group.routeName})`, by: employeeName }]))
+      if (item.returnedQty > 0) logs.push(supabase.from('inventory_logs').insert([{ 
+        id: `LOG-RET-${Date.now()}-${item.productId.slice(-4)}`, 
+        date: new Date().toISOString(),
+        product_id: item.productId, 
+        product_name: item.name, 
+        type: 'IN', 
+        qty: item.returnedQty, 
+        note: `รับคืนจากรถ ${group.routeName} (เคลียร์ยอดรวม)`, 
+        by: employeeName 
+      }]))
+      if (item.damagedQty > 0) logs.push(supabase.from('inventory_logs').insert([{ 
+        id: `LOG-DMG-${Date.now()}-${item.productId.slice(-4)}`, 
+        date: new Date().toISOString(),
+        product_id: item.productId, 
+        product_name: item.name, 
+        type: 'OUT', 
+        qty: item.damagedQty, 
+        note: `ของเสีย/ละลาย (รถ ${group.routeName})`, 
+        by: employeeName 
+      }]))
       return logs
     }).flat()
 
+    // 🌟🌟🌟 ระบบคืนกระสอบเข้าคลังและหักสูญหายอัตโนมัติ 🌟🌟🌟
+    const returnedEmptyBags = Number(bagForm.returnedEmptyBags || 0);
+    const lostBags = Number(bagForm.pendingBags || 0);
+
+    if (returnedEmptyBags > 0 || lostBags > 0) {
+      const { data: sackProd } = await supabase.from('products')
+        .select('id, stock, name')
+        .ilike('name', '%กระสอบเปล่า%')
+        .limit(1)
+        .single();
+      
+      if (sackProd) {
+        let sackStockUpdate = 0;
+
+        // 1. คืนกระสอบดีเข้าคลัง
+        if (returnedEmptyBags > 0) {
+          sackStockUpdate += returnedEmptyBags;
+          logPromises.push(
+            supabase.from('inventory_logs').insert([{
+              id: `LOG-SACK-IN-${Date.now()}`,
+              date: new Date().toISOString(),
+              product_id: sackProd.id,
+              product_name: sackProd.name,
+              type: 'IN',
+              qty: returnedEmptyBags,
+              note: `รับคืนกระสอบเปล่าจากสายส่ง ${group.routeName}`,
+              by: employeeName
+            }])
+          );
+        }
+
+        // 2. กระสอบสูญหาย (ตัดสต๊อกออก เพื่อบันทึกประวัติให้วิเคราะห์ใน Dashboard)
+        if (lostBags > 0) {
+          sackStockUpdate -= lostBags;
+          logPromises.push(
+            supabase.from('inventory_logs').insert([{
+              id: `LOG-SACK-LOST-${Date.now()}`,
+              date: new Date().toISOString(),
+              product_id: sackProd.id,
+              product_name: sackProd.name,
+              type: 'OUT',
+              qty: lostBags,
+              note: `กระสอบสูญหาย (หักเงินสายส่ง ${group.routeName})`,
+              by: employeeName
+            }])
+          );
+        }
+
+        // บันทึกสต๊อกกระสอบใบใหม่
+        if (sackStockUpdate !== 0) {
+          stockPromises.push(
+            supabase.from('products').update({ stock: Number(sackProd.stock || 0) + sackStockUpdate }).eq('id', sackProd.id)
+          );
+        }
+      }
+    }
+
     await Promise.all([...stockPromises, ...logPromises])
-    alert('✅ บันทึกยอดสินค้าและรับของคืนเข้าคลังเรียบร้อยแล้ว!\n(ข้อมูลพร้อมให้ฝ่ายบัญชีสรุปยอดเงินแล้ว)')
+    alert('✅ บันทึกยอดสินค้าและรับกระสอบคืนเข้าคลังเรียบร้อยแล้ว!\n(ข้อมูลพร้อมให้ฝ่ายบัญชีสรุปยอดเงินแล้ว)')
     setSelectedRouteKey(''); fetchPendingRoutesGrouped(); fetchProducts()
   }
 
@@ -554,7 +640,6 @@ export default function TruckLoadingPage() {
           </div>
         </div>
       ) : (
-        /* 🌟 ประวัติจะโชว์ข้อมูล "ของคืน" ได้ถูกต้องแล้วครับ เพราะโค้ดด้านบนเซฟลง Database เรียบร้อย */
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/50">
           <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-100 shadow-sm max-w-6xl mx-auto animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-slate-100 pb-4 gap-4">

@@ -31,24 +31,31 @@ export default function DeveloperPortalPage() {
       return router.push('/login')
     }
 
-    const session = JSON.parse(sessionStr)
+    try {
+      // 🌟 ใส่ Try Catch ป้องกันแอป Crash กรณี LocalStorage โดนแก้จนพัง
+      const session = JSON.parse(sessionStr)
 
-    // ชั้นที่ 2: เช็คกับ Database ยืนยันว่าเป็น Dev ของแท้ (ป้องกันการแฮกแก้ไข LocalStorage)
-    const { data: user, error } = await supabase
-      .from('employees')
-      .select('role')
-      .eq('id', session.id)
-      .single()
+      // ชั้นที่ 2: เช็คกับ Database ยืนยันว่าเป็น Dev ของแท้ (ป้องกันการแฮกแก้ไข LocalStorage)
+      const { data: user, error } = await supabase
+        .from('employees')
+        .select('role')
+        .eq('id', session.id)
+        .single()
 
-    if (error || !user || user.role !== 'ผู้พัฒนาโปรแกรม') {
-      alert('⛔ ภัยคุกคาม: คุณไม่มีสิทธิ์ระดับผู้พัฒนา (Developer) ในการเข้าถึงหน้านี้')
-      return router.push('/') // เตะกลับหน้าแรก
+      if (error || !user || user.role !== 'ผู้พัฒนาโปรแกรม') {
+        alert('⛔ ภัยคุกคาม: คุณไม่มีสิทธิ์ระดับผู้พัฒนา (Developer) ในการเข้าถึงหน้านี้')
+        return router.push('/') // เตะกลับหน้าแรก
+      }
+
+      // ผ่านทุกด่าน! อนุญาตให้แสดงหน้าต่างได้
+      setIsAuthorized(true)
+      fetchSettings()
+      fetchDatabaseStats()
+    } catch (err) {
+      // ถ้ารหัสพัง เตะออกไปหน้าล็อกอิน
+      localStorage.removeItem('kingsawang_session')
+      router.push('/login')
     }
-
-    // ผ่านทุกด่าน! อนุญาตให้แสดงหน้าต่างได้
-    setIsAuthorized(true)
-    fetchSettings()
-    fetchDatabaseStats()
   }
 
   const fetchSettings = async () => {
@@ -84,12 +91,21 @@ export default function DeveloperPortalPage() {
   }
 
   const handleWipeSalesData = async () => {
-    const confirmWord = window.prompt("⚠️ คำเตือน: นี่คือการลบข้อมูลการขายและประวัติลิ้นชักทั้งหมด\n\nพิมพ์คำว่า 'DELETE' เพื่อยืนยัน:")
+    const confirmWord = window.prompt("⚠️ คำเตือน: นี่คือการลบข้อมูลการขายและประวัติทั้งหมด\n\nพิมพ์คำว่า 'DELETE' เพื่อยืนยัน:")
     if (confirmWord === 'DELETE') {
       setIsLoading(true)
-      await supabase.from('sales').delete().neq('id', 'dummy')
-      await supabase.from('drawer_logs').delete().neq('id', 'dummy')
-      alert('🗑️ ล้างข้อมูลธุรกรรมเรียบร้อยแล้ว')
+      
+      // 🌟 อัปเกรด: สั่งล้างข้อมูลตารางธุรกรรมทั้งหมดที่มีในระบบพร้อมกัน
+      await Promise.all([
+        supabase.from('sales').delete().neq('id', 'dummy'),
+        supabase.from('drawer_logs').delete().neq('id', 'dummy'),
+        supabase.from('route_settlements').delete().neq('id', 'dummy'),
+        supabase.from('payroll').delete().neq('id', 'dummy'),
+        supabase.from('cooler_transactions').delete().neq('id', 'dummy'),
+        supabase.from('maintenance_logs').delete().neq('id', 'dummy')
+      ])
+
+      alert('🗑️ ล้างข้อมูลธุรกรรมทั้งหมดในระบบเรียบร้อยแล้ว')
       fetchDatabaseStats()
       setIsLoading(false)
     } else if (confirmWord !== null) {
@@ -198,7 +214,7 @@ export default function DeveloperPortalPage() {
                 <div className="bg-rose-950/20 border border-rose-900/50 p-6 md:p-8 rounded-[2rem] shadow-xl space-y-4">
                   <h2 className="text-base font-black text-rose-500 flex items-center gap-2 border-b border-rose-900/50 pb-4"><span>⚠️</span> Danger Zone (เขตอันตราย)</h2>
                   <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-[#0A0A0A] p-5 rounded-xl border border-rose-900/30">
-                    <div><h3 className="font-bold text-rose-100 text-sm">ล้างข้อมูลธุรกรรมทั้งหมด</h3><p className="text-xs text-slate-500 mt-1">ลบข้อมูลในตารางขาย และ ประวัติลิ้นชักทั้งหมด (รีเซ็ตระบบส่งมอบลูกค้า)</p></div>
+                    <div><h3 className="font-bold text-rose-100 text-sm">ล้างข้อมูลธุรกรรมทั้งหมด</h3><p className="text-xs text-slate-500 mt-1">ลบข้อมูลในตารางขาย การเบิกจ่าย และประวัติทั้งหมด (รีเซ็ตระบบส่งมอบลูกค้า)</p></div>
                     <button type="button" onClick={handleWipeSalesData} className="w-full md:w-auto bg-rose-600 hover:bg-rose-700 text-white px-6 py-3 rounded-lg font-black text-xs transition-colors shrink-0">🚨 เริ่มการล้างข้อมูล</button>
                   </div>
                 </div>

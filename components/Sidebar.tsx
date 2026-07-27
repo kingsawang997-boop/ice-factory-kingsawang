@@ -111,16 +111,20 @@ export default function Sidebar() {
           </Link>
         </div>
 
+        {/* 🌟 3. ระบบสต๊อกสินค้า (เพิ่มเมนูซ่อมบำรุงและอัปเดตชื่อคลัง) */}
         <SectionTitle title="3. ระบบสต๊อกสินค้า" />
         <div className="space-y-1">
           <Link href="/inventory" className={menuClass('/inventory')}>
-            <span className="text-lg transition-transform duration-300 group-hover:scale-110">🏭</span> ดูจำนวนคลังคงเหลือ
+            <span className="text-lg transition-transform duration-300 group-hover:scale-110">🏭</span> คลังสินค้า / กระสอบเปล่า
           </Link>
           <Link href="/inventory/truck-loading" className={subMenuClass('/inventory/truck-loading')}>
             <span className="transition-transform duration-300 group-hover:translate-x-1">🚚</span> จ่ายสินค้าขึ้นหน่วยรถ
           </Link>
           <Link href="/inventory/coolers" className={subMenuClass('/inventory/coolers')}>
             <span className="transition-transform duration-300 group-hover:translate-x-1">🧊</span> ยืม-คืนถังน้ำแข็ง
+          </Link>
+          <Link href="/trucks/maintenance" className={subMenuClass('/trucks/maintenance')}>
+            <span className="transition-transform duration-300 group-hover:translate-x-1">🔧</span> ประวัติซ่อมบำรุงรถยนต์
           </Link>
         </div>
 
