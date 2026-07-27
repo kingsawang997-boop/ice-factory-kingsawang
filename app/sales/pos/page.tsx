@@ -36,7 +36,6 @@ type ReceiptItem = {
   unit?: string
 }
 
-// 🌟 ปรับปรุง Type ให้ชัดเจนแยกกัน ป้องกัน TypeScript Error
 type PrintReceiptData = {
   receiptNo: string
   date: string
@@ -88,9 +87,8 @@ export default function POSPage() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer'>('cash')
   const [cashReceived, setCashReceived] = useState<number | string>('')
   const [isFreeBill, setIsFreeBill] = useState(false)
-  const [cashierName, setCashierName] = useState('พนักงาน')
+  const [cashierName, setCashierName] = useState('กำลังโหลด...')
   
-  // 🌟 ตั้งค่าเริ่มต้นเป็น 58mm ทันทีเป็นพื้นฐาน
   const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
   const [printReceipt, setPrintReceipt] = useState<PrintReceiptData | ManualKickData | null>(null)
 
@@ -103,6 +101,16 @@ export default function POSPage() {
   const [isPinModalOpen, setIsPinModalOpen] = useState(false)
   const [pinInput, setPinInput] = useState('')
   const [isVerifyingPin, setIsVerifyingPin] = useState(false)
+
+  // 🌟 State ระบบล็อกหน้าจอ
+  const [isScreenLocked, setIsScreenLocked] = useState(false)
+  const [unlockPin, setUnlockPin] = useState('')
+  const [isUnlocking, setIsUnlocking] = useState(false)
+
+  // 🌟 State ระบบรับคืนกระสอบ
+  const [isSackReturnModalOpen, setIsSackReturnModalOpen] = useState(false)
+  const [sackReturnQty, setSackReturnQty] = useState<number | string>('')
+  const [sackRefundRate, setSackRefundRate] = useState<number | string>(10) // ค่ามัดจำเริ่มต้น 10 บาท
 
   const pathname = usePathname()
 
@@ -147,7 +155,7 @@ export default function POSPage() {
   const isMobileDevice = () => /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 1024
 
   // ==========================================
-  // 🌟 ฟังก์ชันแปลงภาพเป็น ESC/POS (Graphic Mode สำหรับ 58mm)
+  // 🖨️ ฟังก์ชันแปลงภาพเป็น ESC/POS (Graphic Mode สำหรับ 58mm)
   // ==========================================
   const getEscPosImageBytes = (canvas: HTMLCanvasElement) => {
     const widthBytes = Math.ceil(canvas.width / 8);
@@ -233,9 +241,10 @@ export default function POSPage() {
 
     sendToRawBT(getEscPosImageBytes(finalCanvas));
   }
-  // ==========================================
 
-  // 🚀 จัดการการพิมพ์แยกตาม Format (58mm ใช้ RawBT / A4 ใช้ระบบ Browser Print)
+  // ==========================================
+  // 💵 ฟังก์ชันคิดเงิน
+  // ==========================================
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
     const finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
@@ -287,6 +296,30 @@ export default function POSPage() {
     }
   }
 
+  // ==========================================
+  // 🔓 ฟังก์ชันปลดล็อกหน้าจอ / สลับพนักงาน
+  // ==========================================
+  const handleUnlockScreen = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!unlockPin) return
+    setIsUnlocking(true)
+
+    const { data: employeeData, error } = await supabase.from('employees').select('name').eq('pin', unlockPin).eq('isActive', true).single()
+
+    if (error || !employeeData) {
+      alert('❌ รหัสพนักงานไม่ถูกต้อง หรือไม่มีสิทธิ์เข้าใช้งาน'); setIsUnlocking(false); setUnlockPin(''); return
+    }
+
+    // สลับชื่อเป็นคนใหม่ทันที พร้อมบันทึกลง LocalStorage
+    setCashierName(employeeData.name)
+    const session = JSON.parse(localStorage.getItem('kingsawang_session') || '{}')
+    localStorage.setItem('kingsawang_session', JSON.stringify({ ...session, name: employeeData.name }))
+    
+    setIsScreenLocked(false)
+    setIsUnlocking(false)
+    setUnlockPin('')
+  }
+
   const submitManualOpenWithPin = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!pinInput) return
@@ -317,6 +350,71 @@ export default function POSPage() {
     }
   }
 
+  // ==========================================
+  // ♻️ ฟังก์ชันรับคืนกระสอบ (คืนมัดจำ + คืนสต๊อก)
+  // ==========================================
+  const submitSackReturn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const qty = Number(sackReturnQty);
+    const rate = Number(sackRefundRate);
+    if (qty <= 0 || rate <= 0) return alert('กรุณาระบุจำนวนใบ และราคาคืนมัดจำให้ถูกต้อง');
+
+    const refundAmount = qty * rate;
+    const billNo = `REF-${Date.now().toString().slice(-4)}`;
+
+    // 1. บันทึกยอดขายติดลบ (เพื่อให้ยอดปิดกะหักเงินออกตรงเป๊ะ)
+    const newSale = {
+      id: billNo,
+      totalAmount: -refundAmount,
+      receiveAmount: 0,
+      changeAmount: 0,
+      payMethod: 'cash',
+      items: [{ id: 'SACK-REFUND', name: `รับคืนกระสอบเปล่า`, qty: qty, price: -rate }],
+      by: cashierName,
+      createdAt: new Date().toISOString()
+    };
+    await supabase.from('sales').insert([newSale]);
+
+    // 2. คืนสต๊อก (หาโปรดักส์ที่ชื่อมีคำว่ากระสอบเปล่า)
+    const sackProd = products.find(p => p.name.includes('กระสอบเปล่า'));
+    if (sackProd) {
+      await supabase.from('products').update({ stock: Number(sackProd.stock || 0) + qty }).eq('id', sackProd.id);
+    }
+
+    // 3. บันทึกประวัติเปิดลิ้นชัก
+    await supabase.from('drawer_logs').insert([{
+      id: `LOG-${Date.now()}`,
+      employee_name: cashierName,
+      role: 'แคชเชียร์',
+      reason: `จ่ายเงินคืนค่ามัดจำกระสอบ ${qty} ใบ (-${refundAmount} บ.)`,
+      print_status: 'ผู้ดูแลระบบ'
+    }]);
+
+    // 4. เตะลิ้นชักเพื่อหยิบเงินคืนลูกค้า
+    if (isMobileDevice() && printFormat === '58mm') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 384; canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 384, 80);
+        ctx.fillStyle = '#000000'; ctx.font = '22px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`จ่ายคืนมัดจำกระสอบ: -${refundAmount} บ.`, 192, 40);
+        sendToRawBT(getEscPosImageBytes(canvas));
+      }
+    } else {
+      setPrintReceipt({ isManualKick: true });
+      setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200);
+    }
+
+    alert(`✅ คืนเงินมัดจำ ${refundAmount} บาท และอัปเดตสต๊อกกระสอบเรียบร้อย!`);
+    setIsSackReturnModalOpen(false);
+    setSackReturnQty('');
+    fetchActiveProducts();
+  }
+
+  // ==========================================
+  // 🔐 ฟังก์ชันปิดกะ
+  // ==========================================
   const handleOpenCloseShift = async () => {
     setIsClosingShift(true)
     const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0]
@@ -397,10 +495,22 @@ export default function POSPage() {
           <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 shrink-0 gap-4">
             <TabletNav pathname={pathname} cashierName={cashierName} />
             <div className="flex items-center gap-2 shrink-0">
+              
+              {/* 🌟 ปุ่มรับคืนกระสอบ */}
+              <button onClick={() => setIsSackReturnModalOpen(true)} className="bg-orange-50 text-orange-700 hover:bg-orange-100 px-4 py-3 rounded-2xl font-bold border border-orange-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
+                ♻️ <span className="hidden xl:inline">คืนกระสอบเปล่า</span>
+              </button>
+              
+              {/* 🌟 ปุ่มพักหน้าจอ (Quick Lock) */}
+              <button onClick={() => setIsScreenLocked(true)} className="bg-purple-50 text-purple-700 hover:bg-purple-100 px-4 py-3 rounded-2xl font-bold border border-purple-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
+                🔒 <span className="hidden xl:inline">พักหน้าจอ</span>
+              </button>
+
               <button onClick={() => { setPinInput(''); setIsPinModalOpen(true); }} className="bg-amber-50 text-amber-700 hover:bg-amber-100 px-4 py-3 rounded-2xl font-bold border border-amber-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
                 🔓 <span className="hidden xl:inline">เปิดลิ้นชัก (Manual)</span>
               </button>
-              <div className="bg-white rounded-2xl flex p-1.5 border border-slate-200 shadow-sm">
+              
+              <div className="bg-white rounded-2xl flex p-1.5 border border-slate-200 shadow-sm hidden lg:flex">
                 <button onClick={() => setPrintFormat('58mm')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${printFormat === '58mm' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>58mm</button>
                 <button onClick={() => setPrintFormat('A4')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${printFormat === 'A4' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'}`}>A4</button>
               </div>
@@ -437,6 +547,74 @@ export default function POSPage() {
            </div>
         </div>
       </div>
+
+      {/* 🚀 Modal: หน้าจอล็อก (Quick Lock) */}
+      {isScreenLocked && (
+        <div className="fixed inset-0 z-[3000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col p-8 text-center">
+            <div className="w-20 h-20 bg-purple-50 text-purple-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-6 shadow-sm border border-purple-100">🔒</div>
+            <h2 className="text-2xl font-black text-slate-800 mb-2">หน้าจอถูกล็อก</h2>
+            <p className="text-sm font-bold text-slate-500 mb-8">กรุณากรอกรหัส PIN ของคุณ<br/>เพื่อเข้าใช้งานระบบ POS ต่อ</p>
+            
+            <form onSubmit={handleUnlockScreen} className="space-y-6">
+              <input 
+                type="password" 
+                maxLength={6} 
+                required 
+                autoFocus 
+                value={unlockPin} 
+                onChange={(e) => setUnlockPin(e.target.value)} 
+                className="w-full bg-slate-50 border-2 border-slate-200 px-4 py-4 rounded-xl focus:outline-none focus:border-purple-500 font-black text-3xl text-center text-slate-800 tracking-widest shadow-inner transition-colors" 
+                placeholder="****" 
+              />
+              <button 
+                type="submit" 
+                disabled={isUnlocking || !unlockPin} 
+                className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-purple-600 hover:bg-purple-700 shadow-purple-500/30 disabled:bg-slate-300"
+              >
+                {isUnlocking ? '⏳ กำลังตรวจสอบ...' : 'ปลดล็อกหน้าจอ'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Modal: คืนมัดจำกระสอบ */}
+      {isSackReturnModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-orange-50">
+              <h3 className="font-black text-lg text-orange-700 flex items-center gap-2">♻️ รับคืนกระสอบเปล่า (คืนเงิน)</h3>
+              <button onClick={() => { setIsSackReturnModalOpen(false); setSackReturnQty(''); }} className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 font-bold transition-colors">✕</button>
+            </div>
+            
+            <form onSubmit={submitSackReturn} className="p-6 space-y-5">
+              <div className="space-y-2 text-center">
+                <label className="text-xs font-black tracking-wider text-slate-500 uppercase">จำนวนกระสอบที่ลูกค้านำมาคืน (ใบ)</label>
+                <div className="flex justify-center items-center gap-4">
+                  <button type="button" onClick={() => setSackReturnQty(Math.max(1, Number(sackReturnQty || 1) - 1))} className="w-14 h-14 rounded-2xl bg-slate-100 hover:bg-slate-200 font-black text-2xl text-slate-600 active:scale-95 transition-all shadow-inner">-</button>
+                  <input type="number" min="1" required autoFocus value={sackReturnQty} onChange={e => setSackReturnQty(Number(e.target.value))} className="w-28 border-2 border-slate-200 px-2 py-3 rounded-2xl font-black text-4xl text-center focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all text-slate-800" placeholder="0" />
+                  <button type="button" onClick={() => setSackReturnQty(Number(sackReturnQty || 0) + 1)} className="w-14 h-14 rounded-2xl bg-slate-100 hover:bg-slate-200 font-black text-2xl text-slate-600 active:scale-95 transition-all shadow-inner">+</button>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-slate-100 text-center">
+                <label className="text-xs font-black tracking-wider text-slate-500 uppercase">อัตราคืนมัดจำ (บาท/ใบ)</label>
+                <input type="number" min="1" required value={sackRefundRate} onChange={e => setSackRefundRate(Number(e.target.value))} className="w-24 border-2 border-slate-200 px-2 py-2 rounded-xl font-bold text-lg text-center focus:border-blue-500 outline-none mx-auto text-slate-700" />
+              </div>
+
+              <div className="bg-rose-50 p-4 rounded-xl border border-rose-100 flex justify-between items-center mt-2">
+                <span className="font-bold text-rose-600 text-sm">ยอดจ่ายเงินคืนรวม:</span>
+                <span className="font-black text-3xl text-rose-700">{(Number(sackReturnQty || 0) * Number(sackRefundRate || 0)).toLocaleString()} บ.</span>
+              </div>
+
+              <button type="submit" disabled={Number(sackReturnQty) <= 0} className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-orange-500 hover:bg-orange-600 shadow-orange-500/30 disabled:bg-slate-300 flex items-center justify-center gap-2">
+                💵 ยืนยันเตะลิ้นชัก & จ่ายเงินคืน
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* 🚀 Modal: กรอกรหัส PIN ก่อนเตะลิ้นชัก */}
       {isPinModalOpen && (
