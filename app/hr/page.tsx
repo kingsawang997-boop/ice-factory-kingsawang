@@ -45,6 +45,7 @@ type SalaryPrint = SalarySummary & {
   datePrinted: string
 }
 
+// 🌟 Union Type (ตัวแปรนี้เป็นไปได้ 2 รูปแบบ)
 type PrintSlip = PayrollRecord | SalaryPrint
 
 export default function PayrollPage() {
@@ -86,7 +87,7 @@ export default function PayrollPage() {
 
     let totalLost = 0
     if (data) {
-      data.forEach(d => {
+      data.forEach((d: any) => {
         totalLost += Number(d.details?.bagTracking?.lostBagsToDeduct || 0)
       })
     }
@@ -116,7 +117,7 @@ export default function PayrollPage() {
     const newRecord = {
       id: docNo,
       date: currentDate,
-      employeeName: empInfo?.name,
+      employeeName: empInfo?.name || formData.employeeName,
       role: empInfo?.role,
       type: formData.type,
       amount: netAmount,
@@ -165,11 +166,12 @@ export default function PayrollPage() {
         .order('name', { ascending: true })
 
       if (data && data.length > 0) {
-        const formattedEmployees = data.map(emp => ({
+        const formattedEmployees = data.map((emp: any) => ({
           id: emp.id,
           name: emp.name,
           role: emp.role,
-          baseSalary: Number(emp.salary) || 0
+          // 🌟 แก้ไข: ดึงจาก base_salary ให้ตรงกับตาราง Employee
+          baseSalary: Number(emp.base_salary) || 0 
         }))
         setEmployeeList(formattedEmployees)
         setFormData(prev => ({ ...prev, employeeName: formattedEmployees[0].name }))
@@ -204,7 +206,7 @@ export default function PayrollPage() {
     let totalPenaltyPaid = 0
 
     if (data) {
-      data.forEach(r => {
+      (data as PayrollRecord[]).forEach(r => {
         if (r.type === 'ค่าเที่ยว') {
           totalTripFee += Number(r.details?.grossAmount || r.amount)
           totalPenaltyPaid += Number(r.details?.totalPenalty || 0)
@@ -308,7 +310,7 @@ export default function PayrollPage() {
         
         <div className="max-w-6xl mx-auto space-y-8">
           
-          {/* 🌟 Header & Tabs (สไตล์ Glassmorphism เบาๆ) */}
+          {/* 🌟 Header & Tabs */}
           <div className="bg-white/80 backdrop-blur-xl p-6 md:p-8 rounded-[2rem] border border-slate-200/60 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6 sticky top-4 z-40">
             <div>
               <h1 className="text-2xl font-black text-slate-900 flex items-center gap-3 tracking-tight">
@@ -336,7 +338,7 @@ export default function PayrollPage() {
           </div>
 
           {/* ==========================================
-              TAB 1: บันทึกรายการ (Modern Form)
+              TAB 1: บันทึกรายการ
               ========================================== */}
           {activeTab === 'record' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -414,7 +416,7 @@ export default function PayrollPage() {
           )}
 
           {/* ==========================================
-              TAB 2: สรุปเงินเดือน (Premium Card)
+              TAB 2: สรุปเงินเดือน
               ========================================== */}
           {activeTab === 'salary' && (
             <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -482,7 +484,7 @@ export default function PayrollPage() {
           )}
 
           {/* ==========================================
-              TAB 3: ประวัติย้อนหลัง (Clean Table)
+              TAB 3: ประวัติย้อนหลัง
               ========================================== */}
           {activeTab === 'history' && (
             <div className="bg-white p-6 md:p-8 rounded-[2rem] border border-slate-200/60 shadow-[0_8px_30px_rgb(0,0,0,0.04)] animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -562,7 +564,9 @@ export default function PayrollPage() {
       {printSlip && (
         <div className="hidden print:block text-black font-sans bg-white p-10 max-w-4xl mx-auto min-h-screen">
           
-          {printType === 'voucher' ? (
+          {/* 🌟 ใช้งาน Type Narrowing ด้วยเงื่อนไข 'employeeName' in printSlip */}
+          {'employeeName' in printSlip ? (
+            // ========================== ใบสำคัญจ่าย (Voucher) ==========================
             <>
               <div className="text-center mb-8 pb-6 border-b-4 border-black">
                 <h1 className="text-3xl font-black mb-2">ใบสำคัญจ่าย (Payment Voucher)</h1>
@@ -581,10 +585,10 @@ export default function PayrollPage() {
                     <td className="border-r border-black p-4 font-bold">{printSlip.type === 'ค่าเที่ยว' ? 'จ่ายค่าเที่ยวประจำวัน' : 'เบิกเงินล่วงหน้า (เงินยืม)'}</td>
                     <td className="p-4 text-right font-black text-xl">{(printSlip.details?.grossAmount || printSlip.amount).toLocaleString()}</td>
                   </tr>
-                  {printSlip.details?.totalPenalty > 0 && (
+                  {(printSlip.details?.totalPenalty || 0) > 0 && (
                     <tr className="border-b border-black bg-gray-100">
-                      <td className="border-r border-black p-4 font-bold text-gray-700">หัก: ค่ากระสอบหาย ({printSlip.details.lostBags} ใบ x {printSlip.details.penaltyPerBag} บ.)</td>
-                      <td className="p-4 text-right font-bold text-lg text-gray-700">-{printSlip.details.totalPenalty.toLocaleString()}</td>
+                      <td className="border-r border-black p-4 font-bold text-gray-700">หัก: ค่ากระสอบหาย ({printSlip.details?.lostBags} ใบ x {printSlip.details?.penaltyPerBag} บ.)</td>
+                      <td className="p-4 text-right font-bold text-lg text-gray-700">-{(printSlip.details?.totalPenalty || 0).toLocaleString()}</td>
                     </tr>
                   )}
                   <tr className="bg-gray-200 border-b-2 border-black">
@@ -603,6 +607,7 @@ export default function PayrollPage() {
               </div>
             </>
           ) : (
+            // ========================== ใบรับเงินเดือน (Payslip) ==========================
             <>
               <div className="text-center mb-8 pb-6 border-b-4 border-black">
                 <h1 className="text-3xl font-black mb-2">ใบรับเงินเดือน (Payslip)</h1>

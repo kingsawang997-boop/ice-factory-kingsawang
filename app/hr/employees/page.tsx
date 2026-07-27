@@ -149,11 +149,13 @@ export default function EmployeesPage() {
     }
   }
 
-  const toggleActiveStatus = async (id: string, currentStatus: boolean) => {
-    const actionText = currentStatus ? 'ปิดการใช้งาน (พนักงานลาออก/พักงาน)' : 'เปิดการใช้งาน'
+  // 🌟 แก้ไข: ทำให้ currentStatus รองรับ undefined ป้องกัน Error ใน TypeScript
+  const toggleActiveStatus = async (id: string, currentStatus?: boolean) => {
+    const isCurrentlyActive = currentStatus ?? true // ถ้าไม่มีค่าถือว่าเป็น true (ทำงานอยู่) ไว้ก่อน
+    const actionText = isCurrentlyActive ? 'ปิดการใช้งาน (พนักงานลาออก/พักงาน)' : 'เปิดการใช้งาน'
     if (!confirm(`⚠️ ต้องการ ${actionText} ใช่หรือไม่?\n(ข้อมูลเก่าในระบบบัญชีและค่าเที่ยวจะยังคงอยู่ปกติ)`)) return
 
-    await supabase.from('employees').update({ isActive: !currentStatus }).eq('id', id)
+    await supabase.from('employees').update({ isActive: !isCurrentlyActive }).eq('id', id)
     fetchEmployees()
   }
 
@@ -163,8 +165,8 @@ export default function EmployeesPage() {
     emp.role.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const activeCount = employees.filter(e => e.isActive).length
-  const inactiveCount = employees.filter(e => !e.isActive).length
+  const activeCount = employees.filter(e => e.isActive ?? true).length
+  const inactiveCount = employees.filter(e => !(e.isActive ?? true)).length
 
   return (
     <div className="space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen text-sm font-sans">
@@ -229,10 +231,10 @@ export default function EmployeesPage() {
                 <tr><td colSpan={8} className="p-10 text-center text-slate-400 font-bold">ไม่พบรายชื่อพนักงาน</td></tr>
               ) : (
                 filteredEmployees.map((emp) => (
-                  <tr key={emp.id} className={`hover:bg-slate-50/50 transition-colors ${!emp.isActive ? 'opacity-60 bg-slate-50 grayscale' : ''}`}>
+                  <tr key={emp.id} className={`hover:bg-slate-50/50 transition-colors ${!(emp.isActive ?? true) ? 'opacity-60 bg-slate-50 grayscale' : ''}`}>
                     <td className="p-5 text-xs font-bold text-slate-400">{emp.id}</td>
                     <td className="p-5">
-                      <p className={`font-black text-base ${emp.isActive ? 'text-slate-800' : 'text-slate-500 line-through'}`}>{emp.name}</p>
+                      <p className={`font-black text-base ${(emp.isActive ?? true) ? 'text-slate-800' : 'text-slate-500 line-through'}`}>{emp.name}</p>
                       <p className="text-xs text-slate-500 mt-0.5">📞 {emp.phone}</p>
                     </td>
                     <td className="p-5 text-center">
@@ -250,7 +252,7 @@ export default function EmployeesPage() {
                       {Number(emp.base_salary).toLocaleString()}
                     </td>
                     <td className="p-5 text-center">
-                      {emp.isActive ? (
+                      {(emp.isActive ?? true) ? (
                         <span className="text-emerald-500 font-bold text-xs flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> ทำงานอยู่</span>
                       ) : (
                         <span className="text-rose-500 font-bold text-xs flex items-center justify-center gap-1"><span className="w-2 h-2 rounded-full bg-rose-500"></span> ลาออก/พักงาน</span>
@@ -259,8 +261,8 @@ export default function EmployeesPage() {
                     <td className="p-5 text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button onClick={() => openEditModal(emp)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-600 rounded-lg transition-colors" title="แก้ไขข้อมูล">✏️</button>
-                        <button onClick={() => toggleActiveStatus(emp.id, emp.isActive)} className={`p-2 rounded-lg transition-colors font-bold text-xs ${emp.isActive ? 'bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white'}`} title={emp.isActive ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}>
-                          {emp.isActive ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
+                        <button onClick={() => toggleActiveStatus(emp.id, emp.isActive)} className={`p-2 rounded-lg transition-colors font-bold text-xs ${(emp.isActive ?? true) ? 'bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white'}`} title={(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}>
+                          {(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
                         </button>
                       </div>
                     </td>

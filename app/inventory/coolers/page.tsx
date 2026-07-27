@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type CoolerTransaction = {
@@ -43,11 +43,9 @@ export default function CoolersPage() {
   const [coolerStocks, setCoolerStocks] = useState<CoolerStock[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'pending' | 'returned'>('pending')
-  const [employeeName] = useState(() => {
-    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
-    const session = localStorage.getItem('kingsawang_session')
-    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
-  })
+  
+  // 🌟 แก้ไข: ย้ายการดึง localStorage มาใช้ผ่าน useEffect ป้องกัน Hydration Error
+  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
   const [selectedTx, setSelectedTx] = useState<CoolerTransaction | null>(null)
 
   // Modal States
@@ -64,7 +62,15 @@ export default function CoolersPage() {
   })
   const [returnQty, setReturnQty] = useState<number>(1)
 
-  const fetchData = async () => {
+  useEffect(() => {
+    const session = localStorage.getItem('kingsawang_session')
+    if (session) {
+      setEmployeeName(JSON.parse(session).name)
+    }
+  }, [])
+
+  // 🌟 แก้ไข: ครอบด้วย useCallback ตาม Best Practice ของ React
+  const fetchData = useCallback(async () => {
     setIsLoading(true)
     const [txRes, stockRes] = await Promise.all([
       supabase.from('cooler_transactions').select('*').order('borrow_date', { ascending: false }),
@@ -79,14 +85,14 @@ export default function CoolersPage() {
       }
     }
     setIsLoading(false)
-  }
+  }, [])
 
   useEffect(() => {
     const load = async () => {
       await fetchData()
     }
-    load()
-  }, [])
+    void load()
+  }, [fetchData])
 
   // 🔄 คำนวณสรุปยอดสต๊อกถังแต่ละประเภท
   const stockSummary = coolerStocks.map(stock => {
@@ -185,7 +191,13 @@ export default function CoolersPage() {
             <p className="text-sm text-slate-500 font-medium mt-2 ml-1">ติดตามสต๊อกถังที่ลาน, ยอดค้างส่ง และประวัติการยืมของลูกค้า</p>
           </div>
           <button 
-            onClick={() => setIsBorrowModalOpen(true)} 
+            onClick={() => {
+              // ป้องกันบั๊กเปิดโมดอลแล้วไม่มีค่า Default
+              if (!formData.cooler_type && coolerStocks.length > 0) {
+                setFormData(prev => ({ ...prev, cooler_type: coolerStocks[0].cooler_type }))
+              }
+              setIsBorrowModalOpen(true)
+            }} 
             className="w-full lg:w-auto bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-2xl font-black transition-all shadow-lg shadow-blue-500/30 active:scale-[0.98] flex justify-center items-center gap-2 group"
           >
             <span className="text-xl group-hover:scale-110 transition-transform">➕</span> ทำรายการยืมถัง (นำออก)
