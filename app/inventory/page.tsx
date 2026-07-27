@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -63,11 +63,9 @@ export default function InventoryCheckPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const pathname = usePathname()
-  const [employeeName] = useState(() => {
-    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
-    const session = localStorage.getItem('kingsawang_session')
-    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
-  })
+  
+  // 🌟 แก้ไข: ป้องกัน Hydration Mismatch โดยใช้ useState เปล่าๆ แล้วค่อยไปดึง LocalStorage ใน useEffect
+  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
 
   // 🌟 เพิ่ม State สำหรับเปิด/ปิดหน้าต่างประวัติ
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
@@ -81,29 +79,27 @@ export default function InventoryCheckPage() {
     time: ''
   })
 
-  async function fetchInventory() {
+  // 🌟 แก้ไข: ยุบรวมโค้ดโหลดข้อมูลด้วย useCallback ป้องกันการเรนเดอร์ซ้ำซ้อน
+  const fetchInventory = useCallback(async () => {
     setIsLoading(true)
-    const { data: prodData } = await supabase.from('products').select('*').eq('category', 'main').order('id')
+    const [prodRes, logRes] = await Promise.all([
+      supabase.from('products').select('*').eq('category', 'main').order('id'),
+      supabase.from('inventory_logs').select('*').order('date', { ascending: false }).limit(20)
+    ])
     
-    // 🌟 แก้ไข: ดึงข้อมูลและเรียงลำดับจากคอลัมน์ date ตาม Database Schema ของคุณ
-    const { data: logData } = await supabase.from('inventory_logs').select('*').order('date', { ascending: false }).limit(20)
-    
-    if (prodData) setProducts(prodData)
-    if (logData) setLogs(logData)
+    if (prodRes.data) setProducts(prodRes.data as InventoryProduct[])
+    if (logRes.data) setLogs(logRes.data as InventoryLog[])
     setIsLoading(false)
-  }
+  }, [])
 
   useEffect(() => {
-    const loadInventory = async () => {
-      setIsLoading(true)
-      const { data: prodData } = await supabase.from('products').select('*').eq('category', 'main').order('id')
-      const { data: logData } = await supabase.from('inventory_logs').select('*').order('date', { ascending: false }).limit(20)
-      if (prodData) setProducts(prodData)
-      if (logData) setLogs(logData)
-      setIsLoading(false)
+    const session = localStorage.getItem('kingsawang_session')
+    if (session) {
+      setEmployeeName(JSON.parse(session).name)
     }
-    void loadInventory()
-  }, [])
+    
+    void fetchInventory()
+  }, [fetchInventory])
 
   // 🧮 ฟังก์ชันเปิด Numpad
   const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
@@ -122,6 +118,7 @@ export default function InventoryCheckPage() {
     const product = numpad.product
     
     if (qty <= 0) return alert('กรุณาระบุจำนวนที่ต้องการทำรายการ')
+    if (!product) return
 
     const newStock = numpad.type === 'IN' ? Number(product.stock || 0) + qty : Number(product.stock || 0) - qty
     if (newStock < 0) return alert('❌ ยอดคงเหลือห้ามติดลบ! (สต๊อกไม่พอเบิก)')
@@ -132,7 +129,7 @@ export default function InventoryCheckPage() {
 
     await supabase.from('products').update({ stock: newStock }).eq('id', product.id)
     
-    // 🌟 แก้ไข: บันทึกลงตาราง inventory_logs ให้ตรงชื่อคอลัมน์ใน Supabase
+    // บันทึกลงตาราง inventory_logs ให้ตรงชื่อคอลัมน์ใน Supabase
     await supabase.from('inventory_logs').insert([{
       id: `LOG-${Date.now()}`,
       date: new Date().toISOString(), // ส่งเวลาเข้าคอลัมน์ date
@@ -279,12 +276,10 @@ export default function InventoryCheckPage() {
                       {log.type === 'IN' ? '+' : '-'}{log.qty}
                     </span>
                   </div>
-                  {/* 🌟 แสดงชื่อสินค้าที่ดึงมาจาก product_name */}
                   <p className="font-black text-slate-800 text-base mb-1">{log.product_name}</p>
                   <p className="text-[11px] text-blue-600 font-bold mb-2 bg-blue-50 inline-block px-2 py-0.5 rounded">{log.note}</p>
                   <div className="flex justify-between items-center mt-2 pt-3 border-t border-slate-100 text-[10px] text-slate-400 font-bold">
                     <span className="flex items-center gap-1">👤 บันทึกโดย: {log.by}</span>
-                    {/* 🌟 แปลงวันที่จากคอลัมน์ date มาแสดงผล */}
                     <span>{log.date ? new Date(log.date).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' }) : '-'} น.</span>
                   </div>
                 </div>

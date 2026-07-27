@@ -14,6 +14,7 @@ type CoolerTransaction = {
   note?: string
   status: 'pending' | 'returned'
   recorded_by?: string
+  return_date?: string // 🌟 แก้ไข: เพิ่มตัวแปร return_date ตรงนี้ เพื่อให้ TypeScript รู้จัก
 }
 
 type CoolerStock = {
@@ -44,7 +45,6 @@ export default function CoolersPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'pending' | 'returned'>('pending')
   
-  // 🌟 แก้ไข: ย้ายการดึง localStorage มาใช้ผ่าน useEffect ป้องกัน Hydration Error
   const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
   const [selectedTx, setSelectedTx] = useState<CoolerTransaction | null>(null)
 
@@ -69,7 +69,6 @@ export default function CoolersPage() {
     }
   }, [])
 
-  // 🌟 แก้ไข: ครอบด้วย useCallback ตาม Best Practice ของ React
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     const [txRes, stockRes] = await Promise.all([
@@ -77,7 +76,7 @@ export default function CoolersPage() {
       supabase.from('cooler_stock').select('*').order('id', { ascending: true })
     ])
     
-    if (txRes.data) setTransactions(txRes.data)
+    if (txRes.data) setTransactions(txRes.data as CoolerTransaction[])
     if (stockRes.data) {
       setCoolerStocks(stockRes.data)
       if (stockRes.data.length > 0) {
@@ -192,7 +191,6 @@ export default function CoolersPage() {
           </div>
           <button 
             onClick={() => {
-              // ป้องกันบั๊กเปิดโมดอลแล้วไม่มีค่า Default
               if (!formData.cooler_type && coolerStocks.length > 0) {
                 setFormData(prev => ({ ...prev, cooler_type: coolerStocks[0].cooler_type }))
               }

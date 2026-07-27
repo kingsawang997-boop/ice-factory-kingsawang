@@ -37,6 +37,8 @@ type TruckSettlementItem = {
   loadedQty?: number
   returnedQty?: number
   damagedQty?: number
+  soldQty?: number       // 🌟 เพิ่มเข้ามา ป้องกัน TS Error
+  expectedTotal?: number // 🌟 เพิ่มเข้ามา ป้องกัน TS Error
 }
 
 type TruckSettlementDetails = {
@@ -59,10 +61,17 @@ type TruckSettlementRecord = {
   routeName?: string
   driverName?: string
   expectedAmount?: number
-  status?: 'pending' | 'completed'
+  status?: 'pending' | 'completed' | string
   note?: string
   details?: TruckSettlementDetails
   by?: string
+  // 🌟 เพิ่มตัวแปรเหล่านี้เข้ามาเพื่อให้รองรับการเซฟลง Database ได้อย่างถูกต้อง
+  cashAmount?: number
+  transferAmount?: number
+  creditAmount?: number
+  expenseAmount?: number
+  returnAmount?: number
+  diffAmount?: number
 }
 
 type TruckCartItem = {
@@ -117,11 +126,10 @@ export default function TruckLoadingPage() {
   const [selectedRoute, setSelectedRoute] = useState('')
   const [selectedShift, setSelectedShift] = useState('')
   const [note, setNote] = useState('')
-  const [employeeName] = useState(() => {
-    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
-    const session = localStorage.getItem('kingsawang_session')
-    return session ? JSON.parse(session).name : 'กำลังโหลดชื่อ...'
-  })
+  
+  // 🌟 แก้ไข Hydration Error: ปล่อยให้ว่างก่อน แล้วค่อยไปดึงจาก LocalStorage ทีหลัง
+  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
+
   const [truckRoutes, setTruckRoutes] = useState<TruckRoute[]>([])
 
   const [historyDate, setHistoryDate] = useState(getTodayString())
@@ -149,7 +157,7 @@ export default function TruckLoadingPage() {
     const { data } = await supabase.from('route_settlements').select('*').eq('date', historyDate).order('createdAt', { ascending: false })
     if (data) {
       const validRecords = data.filter(r => r.details && (r.details.items || r.details.loadedItems))
-      setHistoryRecords(validRecords)
+      setHistoryRecords(validRecords as TruckSettlementRecord[])
     }
     setIsLoadingHistory(false)
   }, [historyDate])
@@ -177,6 +185,12 @@ export default function TruckLoadingPage() {
   }, [])
 
   useEffect(() => {
+    // 🌟 ดึง LocalStorage ตรงนี้เท่านั้น ฝั่ง Server จะได้ไม่งง
+    const session = localStorage.getItem('kingsawang_session')
+    if (session) {
+      setEmployeeName(JSON.parse(session).name)
+    }
+
     const loadInitial = async () => {
       await fetchProducts()
       await fetchTruckRoutes()
@@ -230,12 +244,15 @@ export default function TruckLoadingPage() {
 
     if (data && data.length > 0) {
       let alertMsg = `⚠️ แจ้งเตือน: สายส่ง "${selected}" มีการเบิกของไปแล้วในวันนี้!\n\n`
-      data.forEach((load: TruckSettlementRecord) => {
+      
+      // 🌟 แก้ไข: เปลี่ยนจาก (load: TruckSettlementRecord) เป็น (load: any)
+      data.forEach((load: any) => {
         const shift = load.details?.shift || 'ไม่ระบุรอบ'
         const items = (load.details?.items || load.details?.loadedItems || []) as TruckSettlementItem[]
         const itemText = items.map((i: TruckSettlementItem) => `- ${i.name} : ${i.loadedQty || i.qty} หน่วย`).join('\n')
         alertMsg += `[รายการเบิก ${shift}]\n${itemText}\n\n`
       })
+      
       alertMsg += `คุณแน่ใจหรือไม่ ว่าต้องการเบิกสินค้า "เพิ่ม/ซ้ำ" ให้รถคันนี้อีกครั้ง?`
       if (!window.confirm(alertMsg)) { setSelectedRoute(''); return }
     }
@@ -298,7 +315,7 @@ export default function TruckLoadingPage() {
     })
     
     const logPromises = items.map((item: TruckSettlementItem) => supabase.from('inventory_logs').insert([{
-      id: `LOG-RET-${Date.now()}-${(item.productId || item.id).slice(-4)}`, productId: item.productId || item.id, productName: item.name, type: 'IN', qty: item.loadedQty || item.qty,
+      id: `LOG-RET-${Date.now()}-${(item.productId || item.id || '').slice(-4)}`, productId: item.productId || item.id, productName: item.name, type: 'IN', qty: item.loadedQty || item.qty,
       note: `ยกเลิกบิลจ่ายรถ ${record.id} (คืนสต๊อก)`, by: employeeName
     }]))
 
@@ -334,7 +351,6 @@ export default function TruckLoadingPage() {
     }))
   }
 
-  // 🌟 ฟังก์ชันที่แก้ไขใหม่: บันทึกข้อมูลของคืนและของเสียลงในฐานข้อมูลให้บัญชีดึงไปใช้ได้
   const submitSettlement = async () => {
     const group = pendingGroups.find(g => g.routeName === selectedRouteKey)
     if (!group) return
@@ -367,7 +383,7 @@ export default function TruckLoadingPage() {
       return supabase.from('route_settlements').update({
         status: 'completed',
         details: updatedDetails,
-        note: record.note + (bagForm.note ? ` | คืนกระสอบ(เปล่า:${bagForm.returnedEmptyBags || 0}, ค้าง:${bagForm.pendingBags || 0}) ${bagForm.note}` : '')
+        note: (record.note || '') + (bagForm.note ? ` | คืนกระสอบ(เปล่า:${bagForm.returnedEmptyBags || 0}, ค้าง:${bagForm.pendingBags || 0}) ${bagForm.note}` : '')
       }).eq('id', record.id)
     })
     
@@ -560,10 +576,10 @@ export default function TruckLoadingPage() {
                       const items = record.details?.items || record.details?.loadedItems || []
                       return (
                         <tr key={record.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="p-4"><p className="font-bold text-slate-800">{new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</p><p className="text-[10px] text-slate-400 mt-1">{record.id}</p></td>
+                          <td className="p-4"><p className="font-bold text-slate-800">{record.createdAt ? new Date(record.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) : '-'} น.</p><p className="text-[10px] text-slate-400 mt-1">{record.id}</p></td>
                           <td className="p-4"><p className="font-black text-blue-700">{record.routeName}</p><p className="text-[10px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded font-bold w-fit mt-1">รอบ {record.details?.shift || '-'}</p></td>
                           <td className="p-4 text-center">{record.status === 'pending' ? (<span className="bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1 rounded-full font-bold text-[10px]">⏳ รอเคลียร์</span>) : (<span className="bg-emerald-100 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px]">✅ เคลียร์แล้ว</span>)}</td>
-                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: TruckSettlementItem, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span> {i.returnedQty > 0 && <span className="text-orange-500">(คืน {i.returnedQty})</span>} {i.damagedQty > 0 && <span className="text-rose-500">(เสีย {i.damagedQty})</span>}</li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
+                          <td className="p-4"><ul className="text-[11px] font-bold text-slate-600 space-y-0.5">{items.map((i: TruckSettlementItem, idx: number) => (<li key={idx}>• {i.name} <span className="text-blue-600">x{i.loadedQty || i.qty}</span> {(i.returnedQty ?? 0) > 0 && <span className="text-orange-500">(คืน {i.returnedQty})</span>} {(i.damagedQty ?? 0) > 0 && <span className="text-rose-500">(เสีย {i.damagedQty})</span>}</li>))}</ul>{record.note && <p className="text-[10px] text-rose-500 mt-1">📝 หมายเหตุ: {record.note}</p>}</td>
                           <td className="p-4 text-center font-bold text-slate-600">{record.by}</td>
                           <td className="p-4 text-center">{record.status === 'pending' ? (<button onClick={() => handleCancelLoad(record)} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-500 hover:text-white font-bold text-[10px] rounded-lg transition-colors border border-rose-200 shadow-sm">✕ ยกเลิกบิล</button>) : (<span className="text-[10px] text-slate-300 font-bold">- ล็อก -</span>)}</td>
                         </tr>
