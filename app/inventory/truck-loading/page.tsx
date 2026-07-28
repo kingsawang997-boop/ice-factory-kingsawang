@@ -37,8 +37,8 @@ type TruckSettlementItem = {
   loadedQty?: number
   returnedQty?: number
   damagedQty?: number
-  soldQty?: number       // 🌟 เพิ่มเข้ามา ป้องกัน TS Error
-  expectedTotal?: number // 🌟 เพิ่มเข้ามา ป้องกัน TS Error
+  soldQty?: number
+  expectedTotal?: number
 }
 
 type TruckSettlementDetails = {
@@ -97,7 +97,7 @@ type TruckReturnItem = {
 
 function TabletNav({ pathname, employeeName }: TabletNavProps) {
   return (
-    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide">
+    <div className="flex flex-wrap items-center gap-3 pb-2 md:pb-0 shrink-0 w-full lg:w-auto">
       <Link href="/" className="bg-white p-3 md:p-3.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
       <div className="flex bg-white rounded-xl p-1.5 border border-slate-200 shadow-sm shrink-0">
         <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายของขึ้นรถ</Link>
@@ -289,7 +289,6 @@ export default function TruckLoadingPage() {
       return supabase.from('products').update({ stock: Number(currentProd?.stock || 0) - item.qty }).eq('id', item.id)
     })
 
-    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name ให้ตรงกับ Database
     const logPromises = cart.map(item => supabase.from('inventory_logs').insert([{
       id: `LOG-${Date.now()}-${item.id.slice(-4)}`, 
       date: new Date().toISOString(),
@@ -317,7 +316,6 @@ export default function TruckLoadingPage() {
        if (currentProd) return supabase.from('products').update({ stock: Number(currentProd.stock) + Number(item.loadedQty || item.qty) }).eq('id', productId)
     })
     
-    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name
     const logPromises = items.map((item: TruckSettlementItem) => supabase.from('inventory_logs').insert([{
       id: `LOG-RET-${Date.now()}-${(item.productId || item.id || '').slice(-4)}`, 
       date: new Date().toISOString(),
@@ -404,7 +402,6 @@ export default function TruckLoadingPage() {
       if (currentProd) return supabase.from('products').update({ stock: Number(currentProd.stock) + Number(item.returnedQty) }).eq('id', item.productId)
     })
 
-    // 🌟 แก้ไข: ใช้ชื่อคอลัมน์ product_id, product_name
     const logPromises: any[] = returnItems.filter(i => i.returnedQty > 0 || i.damagedQty > 0).map(item => {
       const logs = []
       if (item.returnedQty > 0) logs.push(supabase.from('inventory_logs').insert([{ 
@@ -430,7 +427,6 @@ export default function TruckLoadingPage() {
       return logs
     }).flat()
 
-    // 🌟🌟🌟 ระบบคืนกระสอบเข้าคลังและหักสูญหายอัตโนมัติ 🌟🌟🌟
     const returnedEmptyBags = Number(bagForm.returnedEmptyBags || 0);
     const lostBags = Number(bagForm.pendingBags || 0);
 
@@ -444,7 +440,6 @@ export default function TruckLoadingPage() {
       if (sackProd) {
         let sackStockUpdate = 0;
 
-        // 1. คืนกระสอบดีเข้าคลัง
         if (returnedEmptyBags > 0) {
           sackStockUpdate += returnedEmptyBags;
           logPromises.push(
@@ -461,7 +456,6 @@ export default function TruckLoadingPage() {
           );
         }
 
-        // 2. กระสอบสูญหาย (ตัดสต๊อกออก เพื่อบันทึกประวัติให้วิเคราะห์ใน Dashboard)
         if (lostBags > 0) {
           sackStockUpdate -= lostBags;
           logPromises.push(
@@ -478,7 +472,6 @@ export default function TruckLoadingPage() {
           );
         }
 
-        // บันทึกสต๊อกกระสอบใบใหม่
         if (sackStockUpdate !== 0) {
           stockPromises.push(
             supabase.from('products').update({ stock: Number(sackProd.stock || 0) + sackStockUpdate }).eq('id', sackProd.id)
@@ -494,9 +487,9 @@ export default function TruckLoadingPage() {
 
   return (
     <div className="fixed inset-0 z-[100] flex flex-col bg-slate-100 overflow-hidden text-xs md:text-sm font-sans">
-      <div className="bg-white p-4 border-b border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shrink-0 z-10">
+      <div className="bg-white p-4 border-b border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 shrink-0 z-10">
         <TabletNav pathname={pathname} employeeName={employeeName} />
-        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
+        <div className="flex bg-slate-100 p-1.5 rounded-xl w-full xl:w-auto overflow-x-auto scrollbar-hide">
           <button onClick={() => setActiveTab('form')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'form' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🚚 1. โหลดของขึ้นรถ</button>
           <button onClick={() => setActiveTab('return')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'return' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>📦 2. รับของคืน (เคลียร์ยอด)</button>
           <button onClick={() => setActiveTab('history')} className={`flex-none px-5 py-2.5 rounded-lg font-bold text-sm transition-all shadow-sm ${activeTab === 'history' ? 'bg-white text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>🗂️ 3. ประวัติวันนี้</button>
@@ -505,6 +498,8 @@ export default function TruckLoadingPage() {
 
       {activeTab === 'form' ? (
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+          
+          {/* ซ้าย: สินค้า */}
           <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden relative h-full">
             <h2 className="font-black text-slate-800 text-base md:text-lg mb-4 shrink-0 flex items-center gap-2">🧊 เลือกสินค้าเพื่อจ่ายขึ้นรถ</h2>
             <div className="flex-1 overflow-y-auto pr-2 pb-24 md:pb-0 scrollbar-hide">
@@ -524,52 +519,64 @@ export default function TruckLoadingPage() {
             </div>
           </div>
 
-          <div className="w-full md:w-[400px] lg:w-[450px] bg-white shadow-2xl flex flex-col h-[80vh] md:h-full fixed md:relative bottom-0 z-20 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300 border-l border-slate-200">
-            <div className="p-6 border-b border-slate-100 bg-slate-50 shrink-0"><h2 className="font-black text-slate-900 text-lg flex items-center gap-2">📋 รายการจ่ายขึ้นรถ</h2></div>
-            <div className="p-6 space-y-5 border-b border-slate-100 shrink-0">
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-600">เลือกรถสายส่ง / เส้นทาง <span className="text-rose-500">*</span></label>
-                <select value={selectedRoute} onChange={handleRouteSelection} className="w-full border-2 border-blue-200 px-4 py-3.5 rounded-xl font-bold focus:border-blue-500 bg-blue-50 text-blue-800 outline-none">
+          {/* ขวา: 🌟 ปรับขนาดความกว้างและระยะห่าง (Compact Mode) ตามที่คุณต้องการ */}
+          <div className="w-full md:w-[340px] lg:w-[380px] xl:w-[400px] bg-white shadow-2xl flex flex-col h-[75vh] md:h-full fixed md:relative bottom-0 z-20 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300 border-l border-slate-200">
+            
+            {/* Header: รายการจ่ายขึ้นรถ */}
+            <div className="p-4 md:p-5 border-b border-slate-100 bg-slate-50 shrink-0">
+              <h2 className="font-black text-slate-900 text-lg flex items-center gap-2">📋 รายการจ่ายขึ้นรถ</h2>
+            </div>
+            
+            {/* Form: เลือกรถและกะ */}
+            <div className="p-4 md:p-5 space-y-4 border-b border-slate-100 shrink-0 bg-white">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-600">เลือกรถสายส่ง / เส้นทาง <span className="text-rose-500">*</span></label>
+                <select value={selectedRoute} onChange={handleRouteSelection} className="w-full border-2 border-blue-200 px-3 py-2.5 rounded-xl font-bold focus:border-blue-500 bg-blue-50 text-blue-800 outline-none text-sm">
                   <option value="" disabled>-- เลือกสายส่ง --</option>
                   {truckRoutes.map(r => (<option key={r.id} value={`${r.route_name} (คนขับ: ${r.driver_name})`}>{r.route_name} [ทะเบียน: {r.license_plate}] - {r.driver_name}</option>))}
                 </select>
               </div>
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-600">รอบจ่ายสินค้า <span className="text-rose-500">*</span></label>
-                <div className="grid grid-cols-4 gap-2">
-                  {['รอบเช้า', 'รอบบ่าย', 'รอบเย็น', 'รอบพิเศษ'].map(shift => (<button key={shift} onClick={() => setSelectedShift(shift)} className={`py-2.5 rounded-xl font-bold text-[11px] border-2 transition-all ${selectedShift === shift ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>{shift}</button>))}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-600">รอบจ่ายสินค้า <span className="text-rose-500">*</span></label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['รอบเช้า', 'รอบบ่าย', 'รอบเย็น', 'รอบพิเศษ'].map(shift => (
+                    <button key={shift} onClick={() => setSelectedShift(shift)} className={`py-2 rounded-lg font-bold text-[10px] border-2 transition-all ${selectedShift === shift ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}>{shift}</button>
+                  ))}
                 </div>
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-3 bg-slate-50/50">
+            {/* List: รายการสินค้า (เลื่อนได้และไม่โดนทับ) */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-2.5 bg-slate-50/50 min-h-0">
               {cart.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-5xl">👆</span><p className="font-bold text-sm">จิ้มเลือกสินค้าฝั่งซ้าย</p></div>
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-4xl">👆</span><p className="font-bold text-xs">จิ้มเลือกสินค้าฝั่งซ้าย</p></div>
               ) : (
                 cart.map(item => (
-                  <div key={item.id} className="flex justify-between items-center border border-slate-200 p-3 rounded-2xl bg-white shadow-sm">
-                    <div className="flex-1 pr-2"><h3 className="font-bold text-slate-800 text-sm truncate">{item.name}</h3></div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center bg-slate-100 rounded-xl p-1 border border-slate-200">
-                        <button onClick={() => updateQty(item.id, -1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">-</button>
-                        <button onClick={() => editCartQty(item.id, item.qty)} className="w-10 text-center font-black text-base text-blue-600 hover:bg-blue-100 rounded px-1 transition-colors">{item.qty}</button>
-                        <button onClick={() => updateQty(item.id, 1)} className="w-8 h-8 bg-white hover:bg-slate-50 rounded-lg font-black shadow-sm">+</button>
+                  <div key={item.id} className="flex justify-between items-center border border-slate-200 p-2.5 rounded-xl bg-white shadow-sm">
+                    <div className="flex-1 pr-2"><h3 className="font-bold text-slate-800 text-xs truncate">{item.name}</h3></div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                        <button onClick={() => updateQty(item.id, -1)} className="w-7 h-7 bg-white hover:bg-slate-50 rounded text-slate-600 font-black shadow-sm">-</button>
+                        <button onClick={() => editCartQty(item.id, item.qty)} className="w-8 text-center font-black text-sm text-blue-600 hover:bg-blue-100 rounded transition-colors">{item.qty}</button>
+                        <button onClick={() => updateQty(item.id, 1)} className="w-7 h-7 bg-white hover:bg-slate-50 rounded text-slate-600 font-black shadow-sm">+</button>
                       </div>
-                      <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-rose-500 font-black text-lg px-2">✕</button>
+                      <button onClick={() => removeFromCart(item.id)} className="text-slate-300 hover:text-rose-500 font-black text-base px-1">✕</button>
                     </div>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] space-y-4 shrink-0">
-              <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="หมายเหตุ (เช่น เบิกเพิ่มพิเศษ, งานแต่ง ฯลฯ)" className="w-full border-2 border-slate-200 px-4 py-3 rounded-xl font-bold focus:border-blue-500 outline-none text-xs" />
-              <div className="flex justify-between items-end mb-2">
-                <span className="font-bold text-slate-500 text-sm">ยอดรวมจ่ายของ</span>
-                <span className="font-black text-5xl text-blue-600 tracking-tight">{totalItems}<span className="text-base text-slate-500 ml-2 font-bold">หน่วย</span></span>
+            {/* Footer: สรุปและปุ่มบันทึก (ถูกล็อกให้อยู่ข้างล่างเสมอ ไม่ทับของ) */}
+            <div className="p-4 md:p-5 bg-white border-t border-slate-200 z-10 shrink-0">
+              <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="หมายเหตุ (เช่น เบิกเพิ่มพิเศษ, งานแต่ง ฯลฯ)" className="w-full border-2 border-slate-200 px-3 py-2.5 rounded-xl font-bold focus:border-blue-500 outline-none text-xs mb-3" />
+              <div className="flex justify-between items-end mb-3">
+                <span className="font-bold text-slate-500 text-xs">ยอดรวมจ่ายของ</span>
+                <span className="font-black text-4xl text-blue-600 tracking-tight leading-none">{totalItems}<span className="text-xs text-slate-500 ml-1 font-bold">หน่วย</span></span>
               </div>
-              <button onClick={handleSaveDraft} disabled={cart.length === 0 || !selectedRoute || !selectedShift} className="w-full font-black text-lg py-5 rounded-[1.25rem] bg-slate-800 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 text-white shadow-xl transition-all active:scale-95 flex justify-center items-center gap-2">💾 บันทึกยืนยันจ่ายของขึ้นรถ</button>
+              <button onClick={handleSaveDraft} disabled={cart.length === 0 || !selectedRoute || !selectedShift} className="w-full font-black text-base py-3.5 rounded-xl bg-slate-800 hover:bg-black disabled:bg-slate-200 disabled:text-slate-400 text-white shadow-lg transition-all active:scale-95 flex justify-center items-center gap-2">💾 บันทึกยืนยันจ่ายรถ</button>
             </div>
+
           </div>
         </div>
 
