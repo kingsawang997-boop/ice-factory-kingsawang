@@ -63,7 +63,8 @@ type CloseShiftSlip = {
 
 function TabletNav({ pathname, cashierName }: TabletNavProps) {
   return (
-    <div className="flex items-center gap-3 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+    // 🌟 แก้ไข: ลบ overflow-x-auto ออก และใส่ flex-wrap แทน เพื่อไม่ให้เกิดแท็บเลื่อนสีเทา
+    <div className="flex flex-wrap items-center gap-3 pb-2 md:pb-0">
       <Link href="/" className="bg-white p-3 md:p-4 rounded-2xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
       <div className="flex bg-white rounded-2xl p-1.5 border border-slate-200 shadow-sm shrink-0">
         <Link href="/sales/pos" className={`px-4 py-2.5 rounded-xl text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
@@ -394,69 +395,59 @@ export default function POSPage() {
   }
 
   // ==========================================
-  // 🔐 ฟังก์ชันปิดกะ (อัปเกรดแยกรอบกะในวันเดียวกัน)
+  // 🔓 ฟังก์ชันเตะลิ้นชักเพื่อนับเงิน (ก่อนปิดกะ)
   // ==========================================
+  const openDrawerToCount = async () => {
+    await supabase.from('drawer_logs').insert([{ id: `LOG-${Date.now()}`, employee_name: cashierName, role: 'แคชเชียร์', reason: 'เปิดลิ้นชักเพื่อนับเงิน (ก่อนปิดกะ)', print_status: 'ผู้ดูแลระบบ' }])
+    
+    if (isMobileDevice() && printFormat === '58mm') {
+      const canvas = document.createElement('canvas');
+      canvas.width = 384; canvas.height = 80;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, 384, 80);
+        ctx.fillStyle = '#000000'; ctx.font = '22px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(`เปิดลิ้นชักนับเงิน: ${cashierName}`, 192, 40);
+        sendToRawBT(getEscPosImageBytes(canvas));
+      }
+    } else {
+      setPrintReceipt({ isManualKick: true })
+      setTimeout(() => { window.print(); setTimeout(() => setPrintReceipt(null), 500) }, 200)
+    }
+  }
+
   const handleOpenCloseShift = async () => {
     setIsClosingShift(true)
-    
-    // 1. หาวันที่ปัจจุบัน
     const now = new Date()
     const todayStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
-    
-    let startTime = `${todayStr}T00:00:00+07:00` // ค่าเริ่มต้นคือ เที่ยงคืนของวันนี้
+    let startTime = `${todayStr}T00:00:00+07:00`
     const endTime = `${todayStr}T23:59:59+07:00`
 
-    // 2. ค้นหาว่า "วันนี้" เคยมีการปิดกะไปแล้วหรือยัง? (ดึงประวัติลิ้นชักล่าสุด)
-    const { data: lastLog } = await supabase
-      .from('drawer_logs')
-      .select('id')
-      .eq('reason', 'เปิดอัตโนมัติ (พิมพ์สลิปส่งยอดปิดกะ)')
-      .order('id', { ascending: false })
-      .limit(1)
+    const { data: lastLog } = await supabase.from('drawer_logs').select('id').eq('reason', 'เปิดอัตโนมัติ (พิมพ์สลิปส่งยอดปิดกะ)').order('id', { ascending: false }).limit(1)
 
     if (lastLog && lastLog.length > 0) {
-      // สกัดเอาเวลา (Timestamp) ออกมาจากรหัส ID ของ Log (เช่น LOG-1700000000000)
       const timestampStr = lastLog[0].id.replace('LOG-', '')
       const timestamp = Number(timestampStr)
-      
       if (!isNaN(timestamp)) {
         const lastCloseTime = new Date(timestamp)
         const lastCloseDateStr = new Date(lastCloseTime.getTime() - (lastCloseTime.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
-        
-        // ถ้าประวัติการปิดกะครั้งล่าสุด คือ "วันนี้" -> ให้เริ่มนับยอดใหม่เฉพาะบิลที่เกิด "หลังวินาทีที่ปิดกะ"
         if (lastCloseDateStr === todayStr) {
           startTime = lastCloseTime.toISOString()
         }
       }
     }
 
-    // 3. ดึงยอดขาย "เฉพาะกะนี้" (บิลที่เกิดขึ้นหลัง startTime)
-    const { data } = await supabase
-      .from('sales')
-      .select('totalAmount, payMethod')
-      .gt('createdAt', startTime) // ✨ หัวใจสำคัญ: ดึงเฉพาะบิลที่เวลา "มากกว่า" การปิดกะรอบที่แล้ว
-      .lte('createdAt', endTime)
-
+    const { data } = await supabase.from('sales').select('totalAmount, payMethod').gt('createdAt', startTime).lte('createdAt', endTime)
     let cCash = 0, cTransfer = 0
-    if (data) { 
-      data.forEach(sale => { 
-        if (sale.payMethod === 'cash') cCash += Number(sale.totalAmount); 
-        if (sale.payMethod === 'transfer') cTransfer += Number(sale.totalAmount); 
-      }) 
-    }
-    
-    setPosCashToday(cCash)
-    setPosTransferToday(cTransfer)
+    if (data) { data.forEach(sale => { if (sale.payMethod === 'cash') cCash += Number(sale.totalAmount); if (sale.payMethod === 'transfer') cTransfer += Number(sale.totalAmount); }) }
+    setPosCashToday(cCash); setPosTransferToday(cTransfer)
   }
 
   const submitCloseShift = async () => {
     if (actualPosCash === '') return alert('ระบุยอดเงินที่นับได้จริงในลิ้นชัก')
-    
-    // 🌟 เปลี่ยนคำเตือน ไม่ให้บอกส่วนต่าง ให้พนักงานยืนยันยอดที่นับได้เท่านั้น
     if (!confirm(`ยืนยันการปิดกะด้วยยอดเงินนับจริง: ${Number(actualPosCash).toLocaleString()} บาท ใช่หรือไม่?\n(ระบบจะพิมพ์สลิปและออกจากระบบทันที)`)) return
     
     const diff = Number(actualPosCash) - posCashToday
-    
     await supabase.from('drawer_logs').insert([{ id: `LOG-${Date.now()}`, employee_name: cashierName, role: 'แคชเชียร์', reason: 'เปิดอัตโนมัติ (พิมพ์สลิปส่งยอดปิดกะ)', print_status: 'พิมพ์บิล' }])
     
     const slipId = `CLS-POS-${Date.now().toString().slice(-6)}`
@@ -520,9 +511,11 @@ export default function POSPage() {
         
         {/* === ด้านซ้าย === */}
         <div className="flex-1 flex flex-col p-4 md:p-6 overflow-hidden relative">
-          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 shrink-0 gap-4">
+          
+          {/* 🌟 แก้ไข: เพิ่ม flex-wrap ที่จุดหลักทั้ง 2 จุด เพื่อแก้บั๊ก Scrollbar สีเทา */}
+          <div className="flex flex-wrap lg:flex-nowrap lg:justify-between items-start lg:items-center mb-6 shrink-0 gap-4">
             <TabletNav pathname={pathname} cashierName={cashierName} />
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               
               <button onClick={() => setIsSackReturnModalOpen(true)} className="bg-orange-50 text-orange-700 hover:bg-orange-100 px-4 py-3 rounded-2xl font-bold border border-orange-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
                 ♻️ <span className="hidden xl:inline">คืนกระสอบเปล่า</span>
@@ -727,10 +720,15 @@ export default function POSPage() {
             </div>
             
             <div className="p-6 space-y-6 text-center">
-              <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200">
+              <div className="bg-amber-50 p-5 rounded-2xl border border-amber-200">
                 <span className="text-4xl block mb-2">💵</span>
-                <p className="font-black text-amber-800 text-base mb-1">กรุณานับเงินสดในลิ้นชักทั้งหมด</p>
-                <p className="text-xs font-bold text-amber-600">ระบบจะทำการคำนวณส่วนต่าง (ขาด/เกิน) <br/>และแสดงผลลัพธ์ในสลิปปิดกะ</p>
+                <p className="font-black text-amber-800 text-base mb-3">กรุณานับเงินสดในลิ้นชักทั้งหมด</p>
+                
+                <button onClick={openDrawerToCount} className="mx-auto bg-white border-2 border-amber-300 text-amber-700 hover:bg-amber-100 font-black py-2.5 px-6 rounded-xl shadow-sm transition-transform active:scale-95 text-sm flex items-center justify-center gap-2">
+                  🔓 กดเพื่อเตะลิ้นชักออกมานับเงิน
+                </button>
+                
+                <p className="text-[10px] font-bold text-amber-600 mt-4">ระบบจะทำการคำนวณส่วนต่าง (ขาด/เกิน) <br/>และแสดงผลลัพธ์ในสลิปปิดกะ</p>
               </div>
 
               <div className="space-y-3">
