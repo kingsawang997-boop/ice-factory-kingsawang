@@ -114,7 +114,7 @@ export default function POSPage() {
 
   const fetchActiveProducts = async () => {
     setIsLoading(true)
-    const { data } = await supabase.from('products').select('*').order('id', { ascending: true })
+    const { data } = await supabase.from('products').select('*').order('sort_order', { ascending: true })
     if (data) setProducts((data as Product[]).filter((p) => p.isActive === true || p.isActive === 'true'))
     setIsLoading(false)
   }

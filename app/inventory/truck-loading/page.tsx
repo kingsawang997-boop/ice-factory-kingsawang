@@ -141,7 +141,7 @@ export default function TruckLoadingPage() {
   const [isLoadingPending, setIsLoadingPending] = useState(false)
 
   async function fetchProducts() {
-    const { data } = await supabase.from('products').select('*').eq('category', 'main').eq('isActive', true).order('id')
+    const { data } = await supabase.from('products').select('*').eq('category', 'main').eq('isActive', true).order('sort_order')
     if (data) setProducts(data)
   }
 
