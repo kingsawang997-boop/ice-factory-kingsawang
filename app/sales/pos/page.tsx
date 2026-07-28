@@ -394,15 +394,59 @@ export default function POSPage() {
   }
 
   // ==========================================
-  // 🔐 ฟังก์ชันปิดกะ (อัปเกรดเป็น Blind Close แล้ว)
+  // 🔐 ฟังก์ชันปิดกะ (อัปเกรดแยกรอบกะในวันเดียวกัน)
   // ==========================================
   const handleOpenCloseShift = async () => {
     setIsClosingShift(true)
-    const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0]
-    const { data } = await supabase.from('sales').select('totalAmount, payMethod').gte('createdAt', `${todayStr}T00:00:00+07:00`).lte('createdAt', `${todayStr}T23:59:59+07:00`)
+    
+    // 1. หาวันที่ปัจจุบัน
+    const now = new Date()
+    const todayStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
+    
+    let startTime = `${todayStr}T00:00:00+07:00` // ค่าเริ่มต้นคือ เที่ยงคืนของวันนี้
+    const endTime = `${todayStr}T23:59:59+07:00`
+
+    // 2. ค้นหาว่า "วันนี้" เคยมีการปิดกะไปแล้วหรือยัง? (ดึงประวัติลิ้นชักล่าสุด)
+    const { data: lastLog } = await supabase
+      .from('drawer_logs')
+      .select('id')
+      .eq('reason', 'เปิดอัตโนมัติ (พิมพ์สลิปส่งยอดปิดกะ)')
+      .order('id', { ascending: false })
+      .limit(1)
+
+    if (lastLog && lastLog.length > 0) {
+      // สกัดเอาเวลา (Timestamp) ออกมาจากรหัส ID ของ Log (เช่น LOG-1700000000000)
+      const timestampStr = lastLog[0].id.replace('LOG-', '')
+      const timestamp = Number(timestampStr)
+      
+      if (!isNaN(timestamp)) {
+        const lastCloseTime = new Date(timestamp)
+        const lastCloseDateStr = new Date(lastCloseTime.getTime() - (lastCloseTime.getTimezoneOffset() * 60000)).toISOString().split('T')[0]
+        
+        // ถ้าประวัติการปิดกะครั้งล่าสุด คือ "วันนี้" -> ให้เริ่มนับยอดใหม่เฉพาะบิลที่เกิด "หลังวินาทีที่ปิดกะ"
+        if (lastCloseDateStr === todayStr) {
+          startTime = lastCloseTime.toISOString()
+        }
+      }
+    }
+
+    // 3. ดึงยอดขาย "เฉพาะกะนี้" (บิลที่เกิดขึ้นหลัง startTime)
+    const { data } = await supabase
+      .from('sales')
+      .select('totalAmount, payMethod')
+      .gt('createdAt', startTime) // ✨ หัวใจสำคัญ: ดึงเฉพาะบิลที่เวลา "มากกว่า" การปิดกะรอบที่แล้ว
+      .lte('createdAt', endTime)
+
     let cCash = 0, cTransfer = 0
-    if (data) { data.forEach(sale => { if (sale.payMethod === 'cash') cCash += Number(sale.totalAmount); if (sale.payMethod === 'transfer') cTransfer += Number(sale.totalAmount); }) }
-    setPosCashToday(cCash); setPosTransferToday(cTransfer)
+    if (data) { 
+      data.forEach(sale => { 
+        if (sale.payMethod === 'cash') cCash += Number(sale.totalAmount); 
+        if (sale.payMethod === 'transfer') cTransfer += Number(sale.totalAmount); 
+      }) 
+    }
+    
+    setPosCashToday(cCash)
+    setPosTransferToday(cTransfer)
   }
 
   const submitCloseShift = async () => {
