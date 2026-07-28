@@ -63,14 +63,14 @@ type CloseShiftSlip = {
 
 function TabletNav({ pathname, cashierName }: TabletNavProps) {
   return (
-    <div className="flex items-center gap-3 overflow-x-auto scrollbar-hide shrink-0 w-full xl:w-auto pb-1 xl:pb-0">
-      <Link href="/" className="bg-white p-3 md:p-3.5 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
-      <div className="flex bg-white rounded-xl p-1.5 border border-slate-200 shadow-sm shrink-0">
-        <Link href="/sales/pos" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 <span className="hidden md:inline">ขายหน้าร้าน (POS)</span><span className="md:hidden">POS</span></Link>
-        <Link href="/inventory" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 <span className="hidden md:inline">เช็คคลังสินค้า</span><span className="md:hidden">คลัง</span></Link>
-        <Link href="/inventory/truck-loading" className={`px-4 py-2.5 rounded-lg text-xs md:text-sm font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 <span className="hidden md:inline">จ่ายของขึ้นรถ</span><span className="md:hidden">จ่ายรถ</span></Link>
+    <div className="flex flex-wrap items-center gap-2 shrink-0">
+      <Link href="/" className="bg-white p-3 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center shrink-0">🏠</Link>
+      <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm shrink-0">
+        <Link href="/sales/pos" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 POS</Link>
+        <Link href="/inventory" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>📦 เช็คคลัง</Link>
+        <Link href="/inventory/truck-loading" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายรถ</Link>
       </div>
-      <div className="bg-white px-4 py-3 md:py-3 rounded-xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs shrink-0 flex items-center gap-2">
+      <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs shrink-0 flex items-center gap-2">
         <span className="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-sm">👤</span>
         <span className="hidden md:inline">พนักงาน:</span> {cashierName}
       </div>
@@ -134,7 +134,6 @@ export default function POSPage() {
     return () => window.clearTimeout(sessionTimer)
   }, [])
 
-  // 🌟 อัปเกรด: ดึงสินค้าหมวด 'packaging' มาโชว์รวมกับหมวด 'main' เพื่อให้ขายกระสอบหน้าลานได้
   const mainProducts = products.filter(p => p.category === 'main' || p.category === 'packaging')
   const retailProducts = products.filter(p => p.category === 'retail')
 
@@ -519,13 +518,14 @@ export default function POSPage() {
     <>
       <style dangerouslySetInnerHTML={{__html: `@media print { @page { size: ${closeShiftSlip || printFormat === '58mm' ? '58mm auto' : 'A4 portrait'}; margin: ${closeShiftSlip || printFormat === '58mm' ? '0' : '15mm'}; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; margin: 0; padding: 0;} }`}} />
 
-      <div className={`fixed inset-0 z-[99] flex flex-col md:flex-row bg-slate-100 overflow-hidden text-xs print:hidden ${(printReceipt || closeShiftSlip) ? 'hidden' : 'flex'}`}>
+      {/* 🌟 แก้ไข: ลบ md:flex-row ตรงนี้ออกเด็ดขาด และบังคับให้เป็น flex-col เสมอ */}
+      <div className={`fixed inset-0 z-[99] flex flex-col bg-slate-50 overflow-hidden text-xs md:text-sm font-sans print:hidden ${(printReceipt || closeShiftSlip) ? 'hidden' : 'flex'}`}>
         
-        {/* 🌟 Top Header (แถบยาวด้านบนแบบหน้าจ่ายรถ) */}
-        <div className="bg-white p-4 border-b border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 shrink-0 z-10">
+        {/* 🌟 Top Header: เปลี่ยนเป็นโครงสร้าง flex-wrap เต็มแถบแนวนอน */}
+        <div className="bg-white p-3 md:px-6 md:py-4 border-b border-slate-200 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 shrink-0 z-20">
           <TabletNav pathname={pathname} cashierName={cashierName} />
           
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide w-full xl:w-auto pb-1 xl:pb-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             <button onClick={() => setIsSackReturnModalOpen(true)} className="shrink-0 bg-orange-50 text-orange-700 hover:bg-orange-100 px-4 py-2.5 rounded-xl font-bold border border-orange-200 shadow-sm active:scale-95 text-xs flex items-center gap-2">
               ♻️ <span className="hidden sm:inline">คืนกระสอบเปล่า</span>
             </button>
@@ -553,7 +553,7 @@ export default function POSPage() {
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
           
           {/* === ด้านซ้าย (สินค้า) === */}
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide">
+          <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 scrollbar-hide bg-slate-50">
              {isLoading ? (<div className="text-center py-20 font-bold text-lg text-slate-400">⏳ กำลังโหลดสินค้า...</div>) : (
                <>
                  {mainProducts.length > 0 && (<div><h2 className="font-black text-slate-700 text-sm md:text-base mb-3">🧊 สินค้ากระสอบ และ แพ็ค</h2><div className="grid grid-cols-3 xl:grid-cols-4 gap-4">{mainProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-14 h-14 md:w-20 md:h-20 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 80px, 56px" /> </div>) : (<span className="text-4xl md:text-5xl mb-2 group-hover:scale-110 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center leading-tight mb-1">{product.name}</span><span className="font-black text-blue-600 text-lg">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>)}
@@ -563,9 +563,9 @@ export default function POSPage() {
           </div>
 
           {/* === ด้านขวา (ตะกร้า) === */}
-          <div className="w-full md:w-[350px] lg:w-[400px] xl:w-[450px] bg-white border-l border-slate-200 shadow-2xl flex flex-col h-[75vh] md:h-full fixed md:relative bottom-0 z-20 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300">
+          <div className="w-full md:w-[340px] lg:w-[380px] xl:w-[400px] bg-white border-l border-slate-200 shadow-2xl flex flex-col h-[75vh] md:h-full fixed md:relative bottom-0 z-30 rounded-t-[2rem] md:rounded-none shrink-0 transition-transform duration-300">
              <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/80"><h2 className="font-black text-slate-900 text-lg flex items-center gap-2">🧾 รายการขาย</h2>{cart.length > 0 && (<button onClick={clearCart} className="text-rose-500 font-bold text-sm bg-rose-50 hover:bg-rose-100 px-4 py-2 rounded-xl transition-colors">ล้างรายการ</button>)}</div>
-             <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-slate-50/50">
+             <div className="flex-1 overflow-y-auto p-4 md:p-5 space-y-3 bg-slate-50/50">
                {cart.length === 0 ? (
                  <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-3 opacity-50"><span className="text-5xl">🛒</span><p className="font-bold text-sm">แตะสินค้าด้านซ้ายเพื่อเพิ่มรายการ</p></div>
                ) : (
@@ -573,9 +573,9 @@ export default function POSPage() {
                )}
              </div>
              
-             <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-               <div className="flex justify-between items-end mb-5"><span className="font-bold text-slate-500 text-base">ยอดรวมทั้งสิ้น</span><span className="font-black text-5xl text-slate-900 tracking-tight">{cart.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}<span className="text-base text-slate-500 ml-1 font-bold">บ.</span></span></div>
-               <button onClick={() => setIsCheckoutModalOpen(true)} disabled={cart.length === 0} className="w-full font-black text-xl py-6 rounded-[1.25rem] bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">💳 รับชำระเงิน (Pay)</button>
+             <div className="p-5 md:p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+               <div className="flex justify-between items-end mb-4"><span className="font-bold text-slate-500 text-sm">ยอดรวมทั้งสิ้น</span><span className="font-black text-4xl text-slate-900 tracking-tight">{cart.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}<span className="text-base text-slate-500 ml-1 font-bold">บ.</span></span></div>
+               <button onClick={() => setIsCheckoutModalOpen(true)} disabled={cart.length === 0} className="w-full font-black text-lg py-4 md:py-5 rounded-[1.25rem] bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">💳 รับชำระเงิน (Pay)</button>
              </div>
           </div>
         </div>
