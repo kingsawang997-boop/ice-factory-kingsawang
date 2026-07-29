@@ -8,8 +8,16 @@ type TruckRoute = { id: string; route_name: string; driver_name?: string }
 type Debtor = { id: string; name: string; outstanding?: number }
 type DebtorItem = { productName: string; qty: number; price: number }
 
-type IceBreakdown = { sold45?: number; sold40?: number; sold35?: number; service?: number }
-type PackBreakdown = { icePacks?: number; water1500?: number; water600?: number; water350?: number }
+type IceBreakdown = { sold50?: number; sold45?: number; sold40?: number; sold35?: number; sold32?: number; service?: number }
+type PackBreakdown = {
+  icePacks?: number
+  water1500?: number
+  water600?: number
+  water350?: number
+  water1500PromoSets?: number
+  water600PromoSets?: number
+  water350PromoSets?: number
+}
 type DebtorDetailsPrint = { debtorName?: string; docNo?: string; items?: { productName?: string; qty?: number; price?: number }[]; total?: number }
 type BagTracking = { grossLoad?: number; netLoad?: number; returnedToStock?: number; melted?: number; soldAndService?: number; customerOwe?: number; customerReturnOld?: number; expectedReturn?: number; actualReturn?: number; lostBagsToDeduct?: number }
 type RevenueSummary = { iceSales?: number; packSales?: number; total?: number }
@@ -57,10 +65,11 @@ export default function RouteSettlementPage() {
   const [reportDate, setReportDate] = useState(getTodayString())
   const [isPullingData, setIsPullingData] = useState(false)
 
-  const [adminSettings, setAdminSettings] = useState({ icePrice1: 45, icePrice2: 40, icePrice3: 35, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 })
+  const [adminSettings, setAdminSettings] = useState({ icePrice50: 50, icePrice1: 45, icePrice2: 40, icePrice3: 35, icePrice32: 32, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 })
   const [morningLoad, setMorningLoad] = useState({ totalIceBags: 0, icePacks: 0, water1500: 0, water600: 0, water350: 0 })
-  const [iceData, setIceData] = useState({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
+  const [iceData, setIceData] = useState({ returned: 0, melted: 0, sold50: 0, sold45: 0, sold40: 0, sold35: 0, sold32: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
   const [packReturns, setPackReturns] = useState({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
+  const [waterPromoSets, setWaterPromoSets] = useState({ water1500: 0, water600: 0, water350: 0 })
   const [finance, setFinance] = useState({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
   const [cashierName, setCashierName] = useState('นางสาวนภา หน้าร้าน')
 
@@ -78,7 +87,7 @@ export default function RouteSettlementPage() {
   const fetchLivePrices = useCallback(async () => {
     const { data } = await supabase.from('products').select('name, price').eq('isActive', true)
     if (data) {
-      const newSettings = { icePrice1: 45, icePrice2: 40, icePrice3: 35, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 }
+      const newSettings = { icePrice50: 50, icePrice1: 45, icePrice2: 40, icePrice3: 35, icePrice32: 32, icePackPrice: 15, waterPrice1500: 45, waterPrice600: 45, waterPrice350: 45 }
       data.forEach(p => {
         if (p.name.includes('แพ็ค') && p.name.includes('น้ำแข็ง')) newSettings.icePackPrice = Number(p.price)
         else if (p.name.includes('1500')) newSettings.waterPrice1500 = Number(p.price)
@@ -100,8 +109,9 @@ export default function RouteSettlementPage() {
   }, [])
 
   const fetchTruckLoadingData = useCallback(async () => {
-    setIceData({ returned: 0, melted: 0, sold45: 0, sold40: 0, sold35: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
+    setIceData({ returned: 0, melted: 0, sold50: 0, sold45: 0, sold40: 0, sold35: 0, sold32: 0, service: 0, customerOweBags: 0, customerReturnOldBags: 0, returnEmptyBags: 0 })
     setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
+    setWaterPromoSets({ water1500: 0, water600: 0, water350: 0 })
     setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
     setSelectedDebtorId(''); setSelectedDebtorName('')
     
@@ -199,11 +209,11 @@ export default function RouteSettlementPage() {
   }
 
   const netIceBags = Math.max(0, morningLoad.totalIceBags - iceData.returned)
-  const accountedIceBags = iceData.melted + iceData.service + iceData.sold45 + iceData.sold40 + iceData.sold35
+  const accountedIceBags = iceData.melted + iceData.service + iceData.sold50 + iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.sold32
   const bagDifference = netIceBags - accountedIceBags
-  const iceRevenue = (iceData.sold45 * adminSettings.icePrice1) + (iceData.sold40 * adminSettings.icePrice2) + (iceData.sold35 * adminSettings.icePrice3)
+  const iceRevenue = (iceData.sold50 * adminSettings.icePrice50) + (iceData.sold45 * adminSettings.icePrice1) + (iceData.sold40 * adminSettings.icePrice2) + (iceData.sold35 * adminSettings.icePrice3) + (iceData.sold32 * adminSettings.icePrice32)
 
-  const totalSoldAndServiceBags = iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.service
+  const totalSoldAndServiceBags = iceData.sold50 + iceData.sold45 + iceData.sold40 + iceData.sold35 + iceData.sold32 + iceData.service
   // 🌟 แก้ไขจุดที่เกิด Error: ใส่คำว่า iceData. นำหน้า
   const expectedEmptyBags = totalSoldAndServiceBags - iceData.customerOweBags + iceData.customerReturnOldBags
   const lostEmptyBags = expectedEmptyBags - iceData.returnEmptyBags
@@ -212,13 +222,30 @@ export default function RouteSettlementPage() {
   const waterSold1500 = Math.max(0, morningLoad.water1500 - packReturns.water1500)
   const waterSold600 = Math.max(0, morningLoad.water600 - packReturns.water600)
   const waterSold350 = Math.max(0, morningLoad.water350 - packReturns.water350)
-  const totalPackRevenue = (icePackSold * adminSettings.icePackPrice) + (waterSold1500 * adminSettings.waterPrice1500) + (waterSold600 * adminSettings.waterPrice600) + (waterSold350 * adminSettings.waterPrice350)
+
+  const WATER_PROMO_PACKS = 3
+  const WATER_PROMO_PRICE = 100
+  const calculateWaterRevenue = (sold: number, unitPrice: number, promoSets = 0) => {
+    const validPromoSets = Math.min(Math.max(0, Math.floor(promoSets)), Math.floor(sold / WATER_PROMO_PACKS))
+    const promoPacks = validPromoSets * WATER_PROMO_PACKS
+    return (validPromoSets * WATER_PROMO_PRICE) + ((sold - promoPacks) * unitPrice)
+  }
+
+  const waterRevenue1500 = calculateWaterRevenue(waterSold1500, adminSettings.waterPrice1500, waterPromoSets.water1500)
+  const waterRevenue600 = calculateWaterRevenue(waterSold600, adminSettings.waterPrice600, waterPromoSets.water600)
+  const waterRevenue350 = calculateWaterRevenue(waterSold350, adminSettings.waterPrice350, waterPromoSets.water350)
+  const totalPackRevenue = (icePackSold * adminSettings.icePackPrice) + waterRevenue1500 + waterRevenue600 + waterRevenue350
 
   const totalRevenue = iceRevenue + totalPackRevenue
   const expectedCash = Math.max(0, totalRevenue + finance.payArrears - finance.transfer - finance.dailyArrears - finance.monthlyArrears)
   const cashDifference = finance.actualCash - expectedCash
 
   const updateIce = (field: keyof typeof iceData, value: string) => setIceData(prev => ({ ...prev, [field]: Number(value) }))
+  const updateWaterPromo = (field: keyof typeof waterPromoSets, value: string, sold: number) => {
+    const maxPromoSets = Math.floor(sold / WATER_PROMO_PACKS)
+    const nextValue = Math.min(Math.max(0, Math.floor(Number(value) || 0)), maxPromoSets)
+    setWaterPromoSets(prev => ({ ...prev, [field]: nextValue }))
+  }
   const updateFinance = (field: keyof typeof finance, value: string) => setFinance(prev => ({ ...prev, [field]: Number(value) }))
   const exactCash = () => updateFinance('actualCash', expectedCash.toString())
 
@@ -258,8 +285,16 @@ export default function RouteSettlementPage() {
       bagTracking: { grossLoad: morningLoad.totalIceBags, netLoad: netIceBags, returnedToStock: iceData.returned, melted: iceData.melted, soldAndService: totalSoldAndServiceBags, customerOwe: iceData.customerOweBags, customerReturnOld: iceData.customerReturnOldBags, expectedReturn: expectedEmptyBags, actualReturn: iceData.returnEmptyBags, lostBagsToDeduct: lostEmptyBags },
       cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference },
       debtorDetails: selectedDebtorId ? { debtorName: selectedDebtorName, docNo: debtorDocNo, items: debtorItems, total: finance.monthlyArrears } : null,
-      iceBreakdown: { sold45: iceData.sold45, sold40: iceData.sold40, sold35: iceData.sold35, service: iceData.service },
-      packBreakdown: { icePacks: icePackSold, water1500: waterSold1500, water600: waterSold600, water350: waterSold350 }
+      iceBreakdown: { sold50: iceData.sold50, sold45: iceData.sold45, sold40: iceData.sold40, sold35: iceData.sold35, sold32: iceData.sold32, service: iceData.service },
+      packBreakdown: {
+        icePacks: icePackSold,
+        water1500: waterSold1500,
+        water600: waterSold600,
+        water350: waterSold350,
+        water1500PromoSets: waterPromoSets.water1500,
+        water600PromoSets: waterPromoSets.water600,
+        water350PromoSets: waterPromoSets.water350
+      }
     }
 
     const newSettlement = {
@@ -342,9 +377,11 @@ export default function RouteSettlementPage() {
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-emerald-700">น้ำแข็งส่งคืนคลัง (กระสอบ)</label><input type="number" value={iceData.returned === 0 ? '' : iceData.returned} readOnly className="w-1/2 p-2.5 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" /></div>
                     <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-rose-500">ละลาย / แตก / สูญเสีย</label><input type="number" value={iceData.melted === 0 ? '' : iceData.melted} readOnly className="w-1/2 p-2.5 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-center font-bold outline-none cursor-not-allowed" placeholder="0" /></div>
                     <div className="pt-3 space-y-3 border-t border-slate-100">
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice50}.-)</label><input type="number" value={iceData.sold50 || ''} onChange={e => updateIce('sold50', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice1}.-)</label><input type="number" value={iceData.sold45 || ''} onChange={e => updateIce('sold45', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice2}.-)</label><input type="number" value={iceData.sold40 || ''} onChange={e => updateIce('sold40', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                       <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice3}.-)</label><input type="number" value={iceData.sold35 || ''} onChange={e => updateIce('sold35', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
+                      <div className="flex items-center gap-3"><label className="w-1/2 font-bold text-blue-600">ขายได้ (ราคา {adminSettings.icePrice32}.-)</label><input type="number" value={iceData.sold32 || ''} onChange={e => updateIce('sold32', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-blue-200 text-center font-bold text-blue-700 focus:border-blue-500 outline-none" placeholder="0" /></div>
                     </div>
                     <div className="flex items-center gap-3 pt-3"><label className="w-1/2 font-bold text-slate-600">บริการ (ถุง)</label><input type="number" value={iceData.service || ''} onChange={e => updateIce('service', e.target.value)} className="w-1/2 p-2.5 rounded-xl border border-slate-200 text-center font-bold focus:border-blue-500 outline-none" placeholder="0" /></div>
                   </div>
@@ -368,10 +405,10 @@ export default function RouteSettlementPage() {
                   <div className="border-b-2 border-slate-100 pb-2 mb-4"><h2 className="text-base font-black text-slate-900 flex items-center gap-2"><span className="text-sky-400">📦</span> สินค้าแบบแพ็ค (หักยอดขายอัตโนมัติ)</h2></div>
                   <div className="space-y-4 flex-1">
                     {[
-                      { label: '🧊 น้ำแข็งแพ็ค', field: 'icePacks', load: morningLoad.icePacks, sold: icePackSold, price: adminSettings.icePackPrice }, 
-                      { label: '💧 น้ำดื่ม 1500 ml', field: 'water1500', load: morningLoad.water1500, sold: waterSold1500, price: adminSettings.waterPrice1500 }, 
-                      { label: '💧 น้ำดื่ม 600 ml', field: 'water600', load: morningLoad.water600, sold: waterSold600, price: adminSettings.waterPrice600 }, 
-                      { label: '💧 น้ำดื่ม 350 ml', field: 'water350', load: morningLoad.water350, sold: waterSold350, price: adminSettings.waterPrice350 }
+                      { label: '🧊 น้ำแข็งแพ็ค', field: 'icePacks', load: morningLoad.icePacks, sold: icePackSold, price: adminSettings.icePackPrice, revenue: icePackSold * adminSettings.icePackPrice, promoField: null as keyof typeof waterPromoSets | null },
+                      { label: '💧 น้ำดื่ม 1500 ml', field: 'water1500', load: morningLoad.water1500, sold: waterSold1500, price: adminSettings.waterPrice1500, revenue: waterRevenue1500, promoField: 'water1500' as keyof typeof waterPromoSets },
+                      { label: '💧 น้ำดื่ม 600 ml', field: 'water600', load: morningLoad.water600, sold: waterSold600, price: adminSettings.waterPrice600, revenue: waterRevenue600, promoField: 'water600' as keyof typeof waterPromoSets },
+                      { label: '💧 น้ำดื่ม 350 ml', field: 'water350', load: morningLoad.water350, sold: waterSold350, price: adminSettings.waterPrice350, revenue: waterRevenue350, promoField: 'water350' as keyof typeof waterPromoSets }
                     ].map((item, idx) => (
                       <div key={idx} className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
                         <div className="flex justify-between items-center mb-3"><span className="font-bold text-slate-800">{item.label}</span><span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-1 rounded shadow-sm border border-slate-100">เบิกรวมวันนี้: <span className="text-blue-600">{item.load}</span></span></div>
@@ -380,9 +417,24 @@ export default function RouteSettlementPage() {
                           <input type="number" value={packReturns[item.field as keyof typeof packReturns] === 0 ? '' : packReturns[item.field as keyof typeof packReturns]} readOnly className="w-full p-2 rounded-xl border border-emerald-200 text-center font-bold outline-none bg-emerald-50/50 text-emerald-700 cursor-not-allowed" placeholder="0" />
                           <div className="flex flex-col items-end bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100">
                             <span className="text-[10px] text-blue-600 font-bold whitespace-nowrap">ขาย: {item.sold}</span>
-                            <span className="text-[9px] text-blue-500 font-medium">={(item.sold * item.price).toLocaleString()} บ.</span>
+                            <span className="text-[9px] text-blue-500 font-medium">={item.revenue.toLocaleString()} บ.</span>
                           </div>
                         </div>
+                        {item.promoField && (
+                          <div className="mt-3 flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl p-2.5">
+                            <label className="flex-1 text-[10px] font-black text-amber-700">🏷️ โปรน้ำ 3 แพ็ค 100 บาท (จำนวนชุด)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={Math.floor(item.sold / WATER_PROMO_PACKS)}
+                              value={waterPromoSets[item.promoField] || ''}
+                              onChange={e => updateWaterPromo(item.promoField!, e.target.value, item.sold)}
+                              className="w-20 p-2 rounded-lg border border-amber-300 bg-white text-center font-black text-amber-800 outline-none focus:border-amber-500"
+                              placeholder="0"
+                            />
+                            <span className="text-[9px] font-bold text-amber-600 whitespace-nowrap">สูงสุด {Math.floor(item.sold / WATER_PROMO_PACKS)} ชุด</span>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -491,9 +543,11 @@ export default function RouteSettlementPage() {
                   <tbody className="divide-y divide-slate-100">
                     {selectedDetailRecord.details?.iceBreakdown ? (
                       <>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice1}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold45}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold45 || 0) * adminSettings.icePrice1).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice2}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold40}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold40 || 0) * adminSettings.icePrice2).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">ราคา {adminSettings.icePrice3}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold35}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold35 || 0) * adminSettings.icePrice3).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice50}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold50 || 0}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold50 || 0) * adminSettings.icePrice50).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice1}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold45 || 0}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold45 || 0) * adminSettings.icePrice1).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice2}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold40 || 0}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold40 || 0) * adminSettings.icePrice2).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice3}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold35 || 0}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold35 || 0) * adminSettings.icePrice3).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">ราคา {adminSettings.icePrice32}.-</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.iceBreakdown.sold32 || 0}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.iceBreakdown.sold32 || 0) * adminSettings.icePrice32).toLocaleString()} บ.</td></tr>
                       </>
                     ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
                   </tbody>
@@ -510,9 +564,9 @@ export default function RouteSettlementPage() {
                     {selectedDetailRecord.details?.packBreakdown ? (
                       <>
                         <tr><td className="p-3">น้ำแข็งแพ็ค</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.icePacks}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.icePacks || 0) * adminSettings.icePackPrice).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 1500 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water1500}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water1500 || 0) * adminSettings.waterPrice1500).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 600 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water600}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water600 || 0) * adminSettings.waterPrice600).toLocaleString()} บ.</td></tr>
-                        <tr><td className="p-3">น้ำดื่ม 350 ml</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water350}</td><td className="p-3 text-right font-bold">{((selectedDetailRecord.details.packBreakdown.water350 || 0) * adminSettings.waterPrice350).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 1500 ml {(selectedDetailRecord.details.packBreakdown.water1500PromoSets || 0) > 0 && <span className="text-amber-600 font-bold">(โปร {selectedDetailRecord.details.packBreakdown.water1500PromoSets} ชุด)</span>}</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water1500 || 0}</td><td className="p-3 text-right font-bold">{calculateWaterRevenue(selectedDetailRecord.details.packBreakdown.water1500 || 0, adminSettings.waterPrice1500, selectedDetailRecord.details.packBreakdown.water1500PromoSets || 0).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 600 ml {(selectedDetailRecord.details.packBreakdown.water600PromoSets || 0) > 0 && <span className="text-amber-600 font-bold">(โปร {selectedDetailRecord.details.packBreakdown.water600PromoSets} ชุด)</span>}</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water600 || 0}</td><td className="p-3 text-right font-bold">{calculateWaterRevenue(selectedDetailRecord.details.packBreakdown.water600 || 0, adminSettings.waterPrice600, selectedDetailRecord.details.packBreakdown.water600PromoSets || 0).toLocaleString()} บ.</td></tr>
+                        <tr><td className="p-3">น้ำดื่ม 350 ml {(selectedDetailRecord.details.packBreakdown.water350PromoSets || 0) > 0 && <span className="text-amber-600 font-bold">(โปร {selectedDetailRecord.details.packBreakdown.water350PromoSets} ชุด)</span>}</td><td className="p-3 text-center font-bold">{selectedDetailRecord.details.packBreakdown.water350 || 0}</td><td className="p-3 text-right font-bold">{calculateWaterRevenue(selectedDetailRecord.details.packBreakdown.water350 || 0, adminSettings.waterPrice350, selectedDetailRecord.details.packBreakdown.water350PromoSets || 0).toLocaleString()} บ.</td></tr>
                       </>
                     ) : (<tr><td colSpan={3} className="p-4 text-center text-slate-400">ไม่มีข้อมูลรายละเอียด</td></tr>)}
                   </tbody>
@@ -621,6 +675,13 @@ export default function RouteSettlementPage() {
             </thead>
             <tbody>
               <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black">-- หมวดน้ำแข็ง --</td></tr>
+              {(printSlip.details?.iceBreakdown?.sold50 || 0) > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice50}.-)</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.iceBreakdown?.sold50} กระสอบ</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.iceBreakdown?.sold50 || 0) * adminSettings.icePrice50).toLocaleString()}</td>
+                </tr>
+              )}
               {(printSlip.details?.iceBreakdown?.sold45 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
                   <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice1}.-)</td>
@@ -643,6 +704,14 @@ export default function RouteSettlementPage() {
                 </tr>
               )}
 
+              {(printSlip.details?.iceBreakdown?.sold32 || 0) > 0 && (
+                <tr className="border-b border-gray-300">
+                  <td className="border-r border-black p-1.5 pl-4">น้ำแข็ง (เรทราคา {adminSettings.icePrice32}.-)</td>
+                  <td className="border-r border-black p-1.5 text-center">{printSlip.details?.iceBreakdown?.sold32} กระสอบ</td>
+                  <td className="p-1.5 text-right">{((printSlip.details?.iceBreakdown?.sold32 || 0) * adminSettings.icePrice32).toLocaleString()}</td>
+                </tr>
+              )}
+
               <tr className="bg-gray-100 font-bold"><td colSpan={3} className="p-1.5 border-b border-black border-t">-- หมวดสินค้าแพ็ค --</td></tr>
               {(printSlip.details?.packBreakdown?.icePacks || 0) > 0 && (
                 <tr className="border-b border-gray-300">
@@ -653,23 +722,23 @@ export default function RouteSettlementPage() {
               )}
               {(printSlip.details?.packBreakdown?.water1500 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
-                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 1500 ml</td>
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 1500 ml {(printSlip.details?.packBreakdown?.water1500PromoSets || 0) > 0 ? `(โปร ${printSlip.details?.packBreakdown?.water1500PromoSets} ชุด)` : ''}</td>
                   <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water1500} แพ็ค</td>
-                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water1500 || 0) * adminSettings.waterPrice1500).toLocaleString()}</td>
+                  <td className="p-1.5 text-right">{calculateWaterRevenue(printSlip.details?.packBreakdown?.water1500 || 0, adminSettings.waterPrice1500, printSlip.details?.packBreakdown?.water1500PromoSets || 0).toLocaleString()}</td>
                 </tr>
               )}
               {(printSlip.details?.packBreakdown?.water600 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
-                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 600 ml</td>
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 600 ml {(printSlip.details?.packBreakdown?.water600PromoSets || 0) > 0 ? `(โปร ${printSlip.details?.packBreakdown?.water600PromoSets} ชุด)` : ''}</td>
                   <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water600} แพ็ค</td>
-                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water600 || 0) * adminSettings.waterPrice600).toLocaleString()}</td>
+                  <td className="p-1.5 text-right">{calculateWaterRevenue(printSlip.details?.packBreakdown?.water600 || 0, adminSettings.waterPrice600, printSlip.details?.packBreakdown?.water600PromoSets || 0).toLocaleString()}</td>
                 </tr>
               )}
               {(printSlip.details?.packBreakdown?.water350 || 0) > 0 && (
                 <tr className="border-b border-gray-300">
-                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 350 ml</td>
+                  <td className="border-r border-black p-1.5 pl-4">น้ำดื่ม 350 ml {(printSlip.details?.packBreakdown?.water350PromoSets || 0) > 0 ? `(โปร ${printSlip.details?.packBreakdown?.water350PromoSets} ชุด)` : ''}</td>
                   <td className="border-r border-black p-1.5 text-center">{printSlip.details?.packBreakdown?.water350} แพ็ค</td>
-                  <td className="p-1.5 text-right">{((printSlip.details?.packBreakdown?.water350 || 0) * adminSettings.waterPrice350).toLocaleString()}</td>
+                  <td className="p-1.5 text-right">{calculateWaterRevenue(printSlip.details?.packBreakdown?.water350 || 0, adminSettings.waterPrice350, printSlip.details?.packBreakdown?.water350PromoSets || 0).toLocaleString()}</td>
                 </tr>
               )}
 
