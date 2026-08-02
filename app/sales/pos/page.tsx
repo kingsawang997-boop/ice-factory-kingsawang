@@ -110,6 +110,9 @@ export default function POSPage() {
   const [sackReturnQty, setSackReturnQty] = useState<number | string>('')
   const [sackRefundRate, setSackRefundRate] = useState<number | string>(10)
 
+  const [discountAmount, setDiscountAmount] = useState<number>(0)
+  const [isDiscountModalOpen, setIsDiscountModalOpen] = useState(false)
+
   const pathname = usePathname()
 
   const fetchActiveProducts = async () => {
@@ -138,7 +141,7 @@ export default function POSPage() {
   const retailProducts = products.filter(p => p.category === 'retail')
 
   const subTotal = useMemo(() => cart.reduce((sum, item) => sum + (item.price * item.qty), 0), [cart])
-  const totalAmount = isFreeBill ? 0 : subTotal 
+  const totalAmount = isFreeBill ? 0 : Math.max(0, subTotal - discountAmount)
   const change = useMemo(() => { const r = Number(cashReceived); return r > totalAmount ? r - totalAmount : 0 }, [cashReceived, totalAmount])
 
   const addToCart = (product: Product) => { setCart(prev => { const e = prev.find(i => i.id === product.id); return e ? prev.map(i => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) : [...prev, { ...product, qty: 1 }] }) }
@@ -146,7 +149,7 @@ export default function POSPage() {
   const editPrice = (id: string, currentPrice: number) => { const n = window.prompt('ราคาใหม่:', currentPrice.toString()); if(n) setCart(prev => prev.map(i => i.id === id ? { ...i, price: Number(n) } : i)) }
   const addCustomRetailItem = () => { const p = window.prompt('ลูกค้าระบุซื้อกี่บาท?'); if(p) addToCart({ id: `CUSTOM-${Date.now()}`, name: `น้ำแข็งแบ่งขาย/ตัก (${p}บ.)`, category: 'retail', price: Number(p), unit: 'ถุง', icon: '🛍️', image: '', isActive: true, color: 'bg-orange-50' }) }
   const removeFromCart = (id: string) => setCart(prev => prev.filter(i => i.id !== id))
-  const clearCart = () => { setCart([]); setCashReceived(''); setPaymentMethod('cash'); setIsFreeBill(false); }
+  const clearCart = () => { setCart([]); setCashReceived(''); setPaymentMethod('cash'); setIsFreeBill(false); setDiscountAmount(0); }
   const addQuickCash = (amount: number) => setCashReceived(prev => Number(prev || 0) + amount)
   const exactCash = () => setCashReceived(totalAmount)
 
@@ -248,7 +251,7 @@ export default function POSPage() {
     const currentDate = new Date().toISOString()
     const printDateStr = new Date().toLocaleString('th-TH')
 
-    const newSale = { id: billNo, totalAmount, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
+    const newSale = { id: billNo, totalAmount, discount: discountAmount, subTotal, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
     await supabase.from('sales').insert([newSale])
 
     const stockUpdatePromises = cart
@@ -557,7 +560,7 @@ export default function POSPage() {
              {isLoading ? (<div className="text-center py-20 font-bold text-lg text-slate-400">⏳ กำลังโหลดสินค้า...</div>) : (
                <>
                  {mainProducts.length > 0 && (<div><h2 className="font-black text-slate-700 text-sm md:text-base mb-3">🧊 สินค้ากระสอบ และ แพ็ค</h2><div className="grid grid-cols-3 xl:grid-cols-4 gap-4">{mainProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-14 h-14 md:w-20 md:h-20 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 80px, 56px" /> </div>) : (<span className="text-4xl md:text-5xl mb-2 group-hover:scale-110 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center leading-tight mb-1">{product.name}</span><span className="font-black text-blue-600 text-lg">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>)}
-                 <div><h2 className="font-black text-orange-700 text-sm md:text-base mb-3 border-t border-slate-200 pt-5">🛍️ สินค้าแบ่งขายปลีก (ย่อย)</h2><div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"><button onClick={addCustomRetailItem} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-orange-50 border-orange-300 text-orange-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">⚖️</span><span className="font-bold text-sm text-center mb-1">น้ำแข็งตักขาย</span><span className="font-black text-orange-600 text-xs bg-orange-100 px-2 py-1 rounded">ระบุราคา ✏️</span></button>{retailProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-12 h-12 md:w-16 md:h-16 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 64px, 48px" /> </div>) : (<span className="text-4xl mb-2 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center mb-1">{product.name}</span><span className="font-black text-orange-600 text-base">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>
+                 <div><h2 className="font-black text-orange-700 text-sm md:text-base mb-3 border-t border-slate-200 pt-5">🛍️ สินค้าแบ่งขายปลีก (ย่อย)</h2><div className="grid grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4"><button onClick={addCustomRetailItem} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-orange-50 border-orange-300 text-orange-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">⚖️</span><span className="font-bold text-sm text-center mb-1">น้ำแข็งตักขาย</span><span className="font-black text-orange-600 text-xs bg-orange-100 px-2 py-1 rounded">ระบุราคา ✏️</span></button><button onClick={() => addToCart({ id: `3PACK-${Date.now()}`, name: '3 แพ็ค 100 บาท', category: 'retail', price: 100, unit: 'ชุด', icon: '📦', image: '', isActive: true, color: 'bg-blue-50' })} className="flex flex-col items-center justify-center p-4 rounded-[1.5rem] border-2 bg-blue-50 border-blue-300 text-blue-800 transition-all active:scale-95 shadow-sm hover:shadow-md border-dashed"><span className="text-4xl mb-2 transition-transform">📦</span><span className="font-bold text-sm text-center mb-1">3 แพ็ค</span><span className="font-black text-blue-600 text-xs bg-blue-100 px-2 py-1 rounded">100 บาท</span></button>{retailProducts.map(product => (<button key={product.id} onClick={() => addToCart(product)} className="flex flex-col items-center p-4 rounded-[1.5rem] border-2 bg-white border-slate-200 transition-all active:scale-95 shadow-sm hover:shadow-md hover:bg-slate-50 relative group">{product.image ? (<div className="relative w-12 h-12 md:w-16 md:h-16 mb-2 rounded-2xl overflow-hidden shadow-sm group-hover:scale-105 transition-transform bg-white"><Image src={product.image} alt={product.name} fill className="object-cover" sizes="(min-width: 768px) 64px, 48px" /> </div>) : (<span className="text-4xl mb-2 transition-transform">{product.icon}</span>)}<span className="font-bold text-sm text-center mb-1">{product.name}</span><span className="font-black text-orange-600 text-base">{product.price} <span className="text-[10px] font-bold">บ.</span></span></button>))}</div></div>
                </>
              )}
           </div>
@@ -574,7 +577,14 @@ export default function POSPage() {
              </div>
              
              <div className="p-5 md:p-6 bg-white border-t border-slate-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
-               <div className="flex justify-between items-end mb-4"><span className="font-bold text-slate-500 text-sm">ยอดรวมทั้งสิ้น</span><span className="font-black text-4xl text-slate-900 tracking-tight">{cart.reduce((sum, item) => sum + (item.price * item.qty), 0).toLocaleString()}<span className="text-base text-slate-500 ml-1 font-bold">บ.</span></span></div>
+               <div className="flex justify-between items-end mb-4"><span className="font-bold text-slate-500 text-sm">ยอดรวมทั้งสิ้น</span><span className="font-black text-4xl text-slate-900 tracking-tight">{(cart.reduce((sum, item) => sum + (item.price * item.qty), 0) - discountAmount).toLocaleString()}<span className="text-base text-slate-500 ml-1 font-bold">บ.</span></span></div>
+               {discountAmount > 0 && (
+                 <div className="flex justify-between items-center mb-3 p-3 bg-orange-50 rounded-xl border border-orange-200">
+                   <span className="font-bold text-orange-600 text-sm">ส่วนลด:</span>
+                   <span className="font-black text-lg text-orange-700">{discountAmount.toLocaleString()} บ.</span>
+                 </div>
+               )}
+               <button onClick={() => setIsDiscountModalOpen(true)} className="w-full font-black text-sm py-2 md:py-2.5 rounded-lg mb-3 bg-orange-100 hover:bg-orange-200 text-orange-700 border border-orange-300 transition-all active:scale-95">🏷️ แก้ไขส่วนลด</button>
                <button onClick={() => setIsCheckoutModalOpen(true)} disabled={cart.length === 0} className="w-full font-black text-lg py-4 md:py-5 rounded-[1.25rem] bg-emerald-500 hover:bg-emerald-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white shadow-xl shadow-emerald-500/20 active:scale-95 transition-all">💳 รับชำระเงิน (Pay)</button>
              </div>
           </div>
@@ -608,6 +618,45 @@ export default function POSPage() {
                 {isUnlocking ? '⏳ กำลังตรวจสอบ...' : 'ปลดล็อกหน้าจอ'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Modal: แก้ไขส่วนลด */}
+      {isDiscountModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-sm overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-orange-50">
+              <h3 className="font-black text-lg text-orange-700 flex items-center gap-2">🏷️ แก้ไขส่วนลด</h3>
+              <button onClick={() => setIsDiscountModalOpen(false)} className="w-8 h-8 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-rose-500 font-bold transition-colors">✕</button>
+            </div>
+            
+            <div className="p-6 space-y-5">
+              <div className="space-y-2 text-center">
+                <label className="text-xs font-black tracking-wider text-slate-500 uppercase">ระบุจำนวนส่วนลด (บาท)</label>
+                <div className="flex justify-center items-center gap-4">
+                  <button type="button" onClick={() => setDiscountAmount(Math.max(0, discountAmount - 10))} className="w-14 h-14 rounded-2xl bg-slate-100 hover:bg-slate-200 font-black text-2xl text-slate-600 active:scale-95 transition-all shadow-inner">-</button>
+                  <input type="number" min="0" max={subTotal} autoFocus value={discountAmount} onChange={e => setDiscountAmount(Math.max(0, Math.min(Number(e.target.value), subTotal)))} className="w-32 border-2 border-orange-200 px-2 py-3 rounded-2xl font-black text-4xl text-center focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 outline-none transition-all text-slate-800" placeholder="0" />
+                  <button type="button" onClick={() => setDiscountAmount(Math.min(subTotal, discountAmount + 10))} className="w-14 h-14 rounded-2xl bg-slate-100 hover:bg-slate-200 font-black text-2xl text-slate-600 active:scale-95 transition-all shadow-inner">+</button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100">
+                <button onClick={() => setDiscountAmount(0)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-2 rounded-xl font-bold text-sm">ไม่มีส่วนลด</button>
+                <button onClick={() => setDiscountAmount(10)} className="bg-orange-100 hover:bg-orange-200 text-orange-700 py-2 rounded-xl font-bold text-sm">10 บ.</button>
+                <button onClick={() => setDiscountAmount(20)} className="bg-orange-100 hover:bg-orange-200 text-orange-700 py-2 rounded-xl font-bold text-sm">20 บ.</button>
+                <button onClick={() => setDiscountAmount(50)} className="bg-orange-100 hover:bg-orange-200 text-orange-700 py-2 rounded-xl font-bold text-sm">50 บ.</button>
+              </div>
+
+              <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex justify-between items-center mt-2">
+                <span className="font-bold text-orange-600 text-sm">ยอดหลังหักส่วนลด:</span>
+                <span className="font-black text-2xl text-orange-700">{Math.max(0, subTotal - discountAmount).toLocaleString()} บ.</span>
+              </div>
+
+              <button onClick={() => setIsDiscountModalOpen(false)} className="w-full text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 bg-orange-500 hover:bg-orange-600 shadow-orange-500/30 flex items-center justify-center gap-2">
+                ✓ ยืนยันส่วนลด
+              </button>
+            </div>
           </div>
         </div>
       )}
