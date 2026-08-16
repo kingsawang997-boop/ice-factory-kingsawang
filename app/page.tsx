@@ -66,6 +66,7 @@ export default function DashboardPage() {
     { title: 'จ่ายของขึ้นรถ', icon: '🚚', desc: 'ตัดสต๊อกให้รถสายส่ง', link: '/inventory/truck-loading', color: 'bg-orange-50 text-orange-600 border-orange-100 hover:bg-orange-500 hover:text-white', badge: '' },
     { title: 'เช็คคลังสินค้า', icon: '📦', desc: 'ดูยอดคงเหลือ รับของเข้าคลัง', link: '/inventory', color: 'bg-blue-50 text-blue-600 border-blue-100 hover:bg-blue-600 hover:text-white', badge: stats.lowStock > 0 ? `${stats.lowStock} ใกล้หมด` : '' },
     { title: 'เคลียร์บิลสายส่ง', icon: '📝', desc: 'นับเงินกลับจากรถสายส่ง', link: '/accounting/sales-summary', color: 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-500 hover:text-white', badge: '' },
+    { title: 'สรุปส่งหน้าลาน', icon: '🚚', desc: 'สรุปกระสอบและพนักงานออกส่งหน้าลาน', link: '/accounting/field-delivery', color: 'bg-sky-50 text-sky-600 border-sky-100 hover:bg-sky-500 hover:text-white', badge: '' },
     { title: 'ทะเบียนลูกหนี้', icon: '🤝', desc: 'จัดการเครดิต และรับชำระหนี้', link: '/accounting/debtors', color: 'bg-rose-50 text-rose-600 border-rose-100 hover:bg-rose-500 hover:text-white', badge: '' },
     { title: 'จัดซื้อสินค้า (PO)', icon: '📋', desc: 'สั่งซื้อ กระสอบ ถังน้ำแข็ง', link: '/purchasing', color: 'bg-amber-50 text-amber-600 border-amber-100 hover:bg-amber-500 hover:text-white', badge: stats.pendingPO > 0 ? `${stats.pendingPO} รอรับของ` : '' },
   ]
