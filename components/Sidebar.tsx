@@ -152,6 +152,9 @@ export default function Sidebar() {
           <Link href="/accounting/monthly-summary" className={subMenuClass('/accounting/monthly-summary')}>
             <span className="transition-transform duration-300 group-hover:translate-x-1">📈</span> สรุปงบประจำเดือน
           </Link>
+          <Link href="/accounting/field-delivery" className={subMenuClass('/accounting/field-delivery')}>
+            <span className="transition-transform duration-300 group-hover:translate-x-1">🚚</span> สรุปส่งหน้าลาน
+          </Link>
           <Link href="/expenses" className={subMenuClass('/expenses')}>
             <span className="transition-transform duration-300 group-hover:translate-x-1">💸</span> บันทึกรายจ่ายประจำวัน
           </Link>

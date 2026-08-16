@@ -88,6 +88,9 @@ export default function POSPage() {
   const [cashReceived, setCashReceived] = useState<number | string>('')
   const [isFreeBill, setIsFreeBill] = useState(false)
   const [cashierName, setCashierName] = useState('กำลังโหลด...')
+  const [isFieldDelivery, setIsFieldDelivery] = useState(false)
+  const [fieldDeliveryEmployees, setFieldDeliveryEmployees] = useState<{ id: string; name: string; role: string }[]>([])
+  const [selectedFieldEmployee, setSelectedFieldEmployee] = useState('')
   
   const [printFormat, setPrintFormat] = useState<'58mm' | 'A4'>('58mm')
   const [printReceipt, setPrintReceipt] = useState<PrintReceiptData | ManualKickData | null>(null)
@@ -130,6 +133,7 @@ export default function POSPage() {
 
     const loadProducts = async () => {
       await fetchActiveProducts()
+      await loadFieldDeliveryEmployees()
     }
 
     loadProducts()
@@ -148,8 +152,23 @@ export default function POSPage() {
   const updateQty = (id: string, delta: number) => { setCart(prev => prev.map(i => i.id === id ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)) }
   const editPrice = (id: string, currentPrice: number) => { const n = window.prompt('ราคาใหม่:', currentPrice.toString()); if(n) setCart(prev => prev.map(i => i.id === id ? { ...i, price: Number(n) } : i)) }
   const addCustomRetailItem = () => { const p = window.prompt('ลูกค้าระบุซื้อกี่บาท?'); if(p) addToCart({ id: `CUSTOM-${Date.now()}`, name: `น้ำแข็งแบ่งขาย/ตัก (${p}บ.)`, category: 'retail', price: Number(p), unit: 'ถุง', icon: '🛍️', image: '', isActive: true, color: 'bg-orange-50' }) }
+  const getFieldDeliverySacks = (items: CartItem[]) => items.reduce((sum, item) => {
+    const isDeliveryProduct = item.category !== 'retail' || String(item.name).includes('กระสอบ') || String(item.name).includes('แพ็ค')
+    return sum + (isDeliveryProduct ? Number(item.qty || 0) : 0)
+  }, 0)
+  const loadFieldDeliveryEmployees = async () => {
+    const { data } = await supabase.from('employees').select('id, name, role').eq('isActive', true)
+    const allowedEmployees = (data || []).filter(emp => {
+      const role = String(emp.role || '').trim()
+      return !role.includes('ผู้บริหาร') && !role.includes('แอดมิน') && !role.includes('ผู้พัฒนาโปรแกรม')
+    })
+    setFieldDeliveryEmployees(allowedEmployees)
+    if (!selectedFieldEmployee && allowedEmployees.length > 0) {
+      setSelectedFieldEmployee(allowedEmployees[0].name)
+    }
+  }
   const removeFromCart = (id: string) => setCart(prev => prev.filter(i => i.id !== id))
-  const clearCart = () => { setCart([]); setCashReceived(''); setPaymentMethod('cash'); setIsFreeBill(false); setDiscountAmount(0); }
+  const clearCart = () => { setCart([]); setCashReceived(''); setPaymentMethod('cash'); setIsFreeBill(false); setDiscountAmount(0); setIsFieldDelivery(false); setSelectedFieldEmployee(fieldDeliveryEmployees[0]?.name || ''); }
   const addQuickCash = (amount: number) => setCashReceived(prev => Number(prev || 0) + amount)
   const exactCash = () => setCashReceived(totalAmount)
 
@@ -242,6 +261,7 @@ export default function POSPage() {
 
   const handleCheckout = async () => {
     if (cart.length === 0) return alert('กรุณาเลือกสินค้า')
+    if (isFieldDelivery && !selectedFieldEmployee) return alert('กรุณาเลือกพนักงานที่ออกส่งหน้าลาน')
     const finalReceived = cashReceived === '' ? totalAmount : Number(cashReceived)
     if (paymentMethod === 'cash' && !isFreeBill && finalReceived < totalAmount) return alert('รับเงินมาไม่ครบ!')
 
@@ -250,9 +270,55 @@ export default function POSPage() {
     const actualReceive = isFreeBill ? 0 : (paymentMethod === 'transfer' ? totalAmount : finalReceived)
     const currentDate = new Date().toISOString()
     const printDateStr = new Date().toLocaleString('th-TH')
+    const deliveryEmployeeName = isFieldDelivery ? selectedFieldEmployee : null
+    const deliverySackQty = isFieldDelivery ? getFieldDeliverySacks(cart) : 0
+    const deliveryDateKey = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0]
 
-    const newSale = { id: billNo, totalAmount, discount: discountAmount, subTotal, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }
-    await supabase.from('sales').insert([newSale])
+    const newSale = {
+      id: billNo,
+      totalAmount,
+      discount: discountAmount,
+      subTotal,
+      receiveAmount: actualReceive,
+      changeAmount: finalChange,
+      payMethod: isFreeBill ? 'free' : paymentMethod,
+      items: cart,
+      by: cashierName,
+      createdAt: currentDate,
+      deliveryEmployee: deliveryEmployeeName,
+      deliverySacks: deliverySackQty
+    }
+
+    try {
+      await supabase.from('sales').insert([newSale])
+    } catch (error) {
+      console.warn('Sales insert without delivery columns fallback:', error)
+      await supabase.from('sales').insert([{ id: billNo, totalAmount, discount: discountAmount, subTotal, receiveAmount: actualReceive, changeAmount: finalChange, payMethod: isFreeBill ? 'free' : paymentMethod, items: cart, by: cashierName, createdAt: currentDate }])
+    }
+
+    if (isFieldDelivery && deliveryEmployeeName) {
+      try {
+        const { data: existingRow } = await supabase
+          .from('field_delivery_daily')
+          .select('sacks_sold')
+          .eq('date', deliveryDateKey)
+          .eq('employee_name', deliveryEmployeeName)
+          .maybeSingle()
+
+        const currentSold = Number(existingRow?.sacks_sold || 0)
+        const nextSold = currentSold + deliverySackQty
+
+        await supabase.from('field_delivery_daily').upsert({
+          date: deliveryDateKey,
+          employee_name: deliveryEmployeeName,
+          sacks_sold: nextSold,
+          cashier_name: cashierName,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'date,employee_name' })
+      } catch (error) {
+        console.warn('Field delivery summary log skipped:', error)
+      }
+    }
 
     const stockUpdatePromises = cart
       .filter(item => !String(item.id).startsWith('CUSTOM-'))
@@ -263,13 +329,14 @@ export default function POSPage() {
     await Promise.all(stockUpdatePromises)
 
     const logId = `LOG-${Date.now()}`
+    const deliveryLogReason = isFieldDelivery ? `ส่งหน้าลาน: ${deliveryEmployeeName} (${deliverySackQty} กระสอบ)` : `ขายบิล #${billNo} (${isFreeBill ? 'ให้ฟรี' : 'โอนเงิน'})`
     
     if (isFreeBill || paymentMethod === 'transfer') {
-      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `ขายบิล #${billNo} (${isFreeBill ? 'ให้ฟรี' : 'โอนเงิน'})`, print_status: 'ไม่พิมพ์บิล' }])
+      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: deliveryLogReason, print_status: 'ไม่พิมพ์บิล' }])
       alert('✅ บันทึกรายการและตัดสต๊อกสำเร็จ (ไม่ได้สั่งพิมพ์บิล)')
       clearCart(); setIsCheckoutModalOpen(false); fetchActiveProducts()
     } else {
-      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
+      await supabase.from('drawer_logs').insert([{ id: logId, employee_name: cashierName, role: 'แคชเชียร์', reason: isFieldDelivery ? `ส่งหน้าลาน: ${deliveryEmployeeName} (${deliverySackQty} กระสอบ)` : `เปิดอัตโนมัติ (ขายบิล #${billNo})`, print_status: 'พิมพ์บิล' }])
       setIsCheckoutModalOpen(false)
 
       const receiptData = { receiptNo: billNo, date: printDateStr, items: cart, total: totalAmount, received: actualReceive, change: finalChange, method: 'เงินสด', cashier: cashierName }
@@ -732,6 +799,30 @@ export default function POSPage() {
                 <input type="checkbox" checked={isFreeBill} onChange={(e) => {setIsFreeBill(e.target.checked); setPaymentMethod('cash'); setCashReceived('');}} className="w-4 h-4 accent-orange-500 rounded" />
                 <span className="font-bold text-xs">🎁 ให้ฟรี / เป็นของแถม (ไม่เตะลิ้นชัก)</span>
               </label>
+
+              <label className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border-2 transition-all cursor-pointer ${isFieldDelivery ? 'bg-blue-50 border-blue-400 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                <input type="checkbox" checked={isFieldDelivery} onChange={(e) => {
+                  const checked = e.target.checked
+                  setIsFieldDelivery(checked)
+                  if (checked && fieldDeliveryEmployees.length > 0 && !selectedFieldEmployee) {
+                    setSelectedFieldEmployee(fieldDeliveryEmployees[0].name)
+                  }
+                  if (!checked) setSelectedFieldEmployee('')
+                }} className="w-4 h-4 accent-blue-500 rounded" />
+                <span className="font-bold text-xs">🚚 ออกส่งหน้าลาน</span>
+              </label>
+
+              {isFieldDelivery && (
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-bold text-slate-600">เลือกพนักงานออกส่งหน้าลาน</label>
+                  <select value={selectedFieldEmployee} onChange={(e) => setSelectedFieldEmployee(e.target.value)} className="w-full border border-slate-200 bg-slate-50 rounded-xl px-3 py-2.5 text-sm font-bold text-slate-700 focus:border-blue-500 focus:outline-none">
+                    <option value="">-- เลือกพนักงาน --</option>
+                    {fieldDeliveryEmployees.map(emp => (
+                      <option key={emp.id} value={emp.name}>{emp.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-between items-end border-b border-slate-100 pb-2">
                 <span className="font-bold text-slate-500 text-xs">ยอดที่ต้องชำระ:</span>
