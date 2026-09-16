@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
@@ -16,6 +16,8 @@ type ApprovalQueueItem = {
 }
 
 const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
+
+const isStockApproverRole = (role: string) => /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
 
 const createLogId = () => `LOG-${Date.now()}`
 
@@ -48,19 +50,66 @@ export default function StockApprovalQueuePage() {
       return ''
     }
   })
-  const [isApprover] = useState(() => {
-    if (typeof window === 'undefined') return false
-    try {
-      const session = localStorage.getItem('kingsawang_session')
-      if (!session) return false
-      const parsed = JSON.parse(session)
-      const role = String(parsed?.role || '')
-      return Boolean(parsed?.isStockApprover) || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
-    } catch {
-      return false
+  const [isApprover, setIsApprover] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const refreshStatus = () => {
+      if (typeof window === 'undefined') return
+      try {
+        const session = localStorage.getItem('kingsawang_session')
+        if (!session) {
+          setIsApprover(false)
+          setRequests([])
+          setIsLoading(false)
+          return
+        }
+
+        const parsed = JSON.parse(session)
+        const role = String(parsed?.role || '')
+        setIsApprover(Boolean(parsed?.isStockApprover) || isStockApproverRole(role))
+      } catch {
+        setIsApprover(false)
+      }
+
+      setRequests(readStockApprovalQueue())
+      setIsLoading(false)
     }
-  })
-  const [isLoading] = useState(false)
+
+    refreshStatus()
+  }, [])
+
+  const refreshQueue = async () => {
+    const localQueue = readStockApprovalQueue()
+    let mergedQueue = [...localQueue]
+
+    try {
+      const { data, error } = await supabase.from('inbox_entries').select('*').limit(100)
+      if (!error && Array.isArray(data)) {
+        const inboxItems = data
+          .filter((entry) => entry?.type === 'stock_approval' || entry?.kind === 'stock_approval' || /อนุมัติ.*สต็อก|stock.*approval/i.test(String(entry?.message || entry?.title || '')))
+          .map((entry) => ({
+            id: String(entry?.id || `inbox-${Date.now()}`),
+            productId: String(entry?.product_id || entry?.target_id || 'unknown'),
+            productName: String(entry?.product_name || entry?.title || 'สินค้า'),
+            qty: Number(entry?.qty || entry?.quantity || 0),
+            reason: String(entry?.reason || entry?.message || 'จัดการสต๊อก'),
+            requestedBy: String(entry?.requested_by || entry?.sender || entry?.owner || 'ระบบ'),
+            requestedAt: String(entry?.created_at || entry?.createdAt || new Date().toISOString()),
+            status: 'pending' as const
+          }))
+
+        const byId = new Map(mergedQueue.map((item) => [item.id, item]))
+        inboxItems.forEach((item) => byId.set(item.id, item))
+        mergedQueue = Array.from(byId.values()).sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())
+      }
+    } catch {
+      // Ignore missing inbox table and keep local queue only.
+    }
+
+    writeStockApprovalQueue(mergedQueue)
+    setRequests(mergedQueue)
+  }
 
   const handleApprove = async (request: ApprovalQueueItem) => {
     if (!isApprover) {
@@ -95,6 +144,7 @@ export default function StockApprovalQueuePage() {
     const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
     writeStockApprovalQueue(queue)
     setRequests(queue)
+    void refreshQueue()
     alert('✅ อนุมัติคำขอลบสต๊อกสำเร็จ')
   }
 
@@ -107,6 +157,7 @@ export default function StockApprovalQueuePage() {
     const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
     writeStockApprovalQueue(queue)
     setRequests(queue)
+    void refreshQueue()
     alert('❌ ปฏิเสธคำขออนุมัติแล้ว')
   }
 
@@ -119,6 +170,7 @@ export default function StockApprovalQueuePage() {
             <h1 className="mt-2 text-2xl font-black text-slate-900">คิวอนุมัติการลบสต๊อก</h1>
           </div>
           <div className="flex gap-3">
+            <button onClick={() => void refreshQueue()} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all">↻ อัปเดต</button>
             <Link href="/inventory" className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all">← กลับหน้าคลัง</Link>
           </div>
         </div>

@@ -40,7 +40,7 @@ export default function LoginPage() {
     // 1. ตรวจสอบ Username / Password
     const { data: user, error } = await supabase
       .from('employees')
-      .select('id, name, role, isActive, isStockApprover')
+      .select('id, name, role, isActive')
       .eq('username', username)
       .eq('password', password)
       .single()
@@ -65,7 +65,7 @@ export default function LoginPage() {
       id: user.id,
       name: user.name,
       role,
-      isStockApprover: Boolean(user.isStockApprover) || isStockApprover,
+      isStockApprover,
       loginAt: new Date().getTime()
     }
     

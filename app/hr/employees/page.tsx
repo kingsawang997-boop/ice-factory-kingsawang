@@ -14,7 +14,6 @@ export default function EmployeesPage() {
     password?: string | null
     pin?: string | null
     isActive?: boolean
-    isStockApprover?: boolean
   }
 
   type Role = { role: string }
@@ -36,8 +35,7 @@ export default function EmployeesPage() {
     phone: '',
     username: '',
     password: '',
-    pin: '',
-    isStockApprover: false
+    pin: ''
   })
 
   const fetchEmployees = useCallback(async () => {
@@ -90,8 +88,7 @@ export default function EmployeesPage() {
       username: formData.username || null,
       password: formData.password || null,
       pin: formData.pin || null,
-      isActive: true,
-      isStockApprover: formData.isStockApprover
+      isActive: true
     }
 
     const { error } = await supabase.from('employees').insert([payload])
@@ -105,7 +102,7 @@ export default function EmployeesPage() {
     } else {
       alert('✅ เพิ่มรายชื่อพนักงานสำเร็จ!')
       setIsAddModalOpen(false)
-      setFormData({ id: '', name: '', role: roles[0]?.role || '', base_salary: '', phone: '', username: '', password: '', pin: '', isStockApprover: false })
+      setFormData({ id: '', name: '', role: roles[0]?.role || '', base_salary: '', phone: '', username: '', password: '', pin: '' })
       fetchEmployees()
     }
   }
@@ -119,8 +116,7 @@ export default function EmployeesPage() {
       phone: emp.phone || '',
       username: emp.username || '',
       password: emp.password || '',
-      pin: emp.pin || '',
-      isStockApprover: Boolean(emp.isStockApprover)
+      pin: emp.pin || ''
     })
     setIsEditModalOpen(true)
   }
@@ -135,8 +131,7 @@ export default function EmployeesPage() {
       phone: formData.phone || '-',
       username: formData.username || null,
       password: formData.password || null,
-      pin: formData.pin || null,
-      isStockApprover: formData.isStockApprover
+      pin: formData.pin || null
     }
 
     const { error } = await supabase.from('employees').update(payload).eq('id', formData.id)
@@ -161,14 +156,6 @@ export default function EmployeesPage() {
     if (!confirm(`⚠️ ต้องการ ${actionText} ใช่หรือไม่?\n(ข้อมูลเก่าในระบบบัญชีและค่าเที่ยวจะยังคงอยู่ปกติ)`)) return
 
     await supabase.from('employees').update({ isActive: !isCurrentlyActive }).eq('id', id)
-    fetchEmployees()
-  }
-
-  const toggleStockApprover = async (id: string, currentStatus?: boolean) => {
-    const actionText = currentStatus ? 'ยกเลิกสิทธิ์อนุมัติสต๊อก' : 'ให้สิทธิ์อนุมัติสต๊อก'
-    if (!confirm(`⚠️ ต้องการ ${actionText} ใช่หรือไม่?`)) return
-
-    await supabase.from('employees').update({ isStockApprover: !(currentStatus ?? false) }).eq('id', id)
     fetchEmployees()
   }
 
@@ -206,7 +193,7 @@ export default function EmployeesPage() {
             </div>
           </div>
           <button 
-            onClick={() => { setFormData({ id: '', name: '', role: roles[0]?.role || '', base_salary: '', phone: '', username: '', password: '', pin: '', isStockApprover: false }); setIsAddModalOpen(true); }} 
+            onClick={() => { setFormData({ id: '', name: '', role: roles[0]?.role || '', base_salary: '', phone: '', username: '', password: '', pin: '' }); setIsAddModalOpen(true); }} 
             className="bg-slate-900 hover:bg-black text-white px-6 py-3 rounded-xl font-bold transition-all shadow-lg flex justify-center items-center gap-2 active:scale-95"
           >
             <span>➕</span> เพิ่มพนักงานใหม่
@@ -272,20 +259,11 @@ export default function EmployeesPage() {
                       )}
                     </td>
                     <td className="p-5 text-center">
-                      <div className="flex flex-col items-center justify-center gap-2">
-                        <button
-                          onClick={() => toggleStockApprover(emp.id, emp.isStockApprover)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-black transition-colors ${emp.isStockApprover ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}
-                          title={emp.isStockApprover ? 'ยกเลิกสิทธิ์อนุมัติสต๊อก' : 'ให้สิทธิ์อนุมัติสต๊อก'}
-                        >
-                          {emp.isStockApprover ? 'อนุมัติสต๊อก ✅' : 'ไม่อนุมัติ ❌'}
+                      <div className="flex items-center justify-center gap-2">
+                        <button onClick={() => openEditModal(emp)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-600 rounded-lg transition-colors" title="แก้ไขข้อมูล">✏️</button>
+                        <button onClick={() => toggleActiveStatus(emp.id, emp.isActive)} className={`p-2 rounded-lg transition-colors font-bold text-xs ${(emp.isActive ?? true) ? 'bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white'}`} title={(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}>
+                          {(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
                         </button>
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => openEditModal(emp)} className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-600 rounded-lg transition-colors" title="แก้ไขข้อมูล">✏️</button>
-                          <button onClick={() => toggleActiveStatus(emp.id, emp.isActive)} className={`p-2 rounded-lg transition-colors font-bold text-xs ${(emp.isActive ?? true) ? 'bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white'}`} title={(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}>
-                            {(emp.isActive ?? true) ? 'ปิดการใช้งาน' : 'เปิดการใช้งาน'}
-                          </button>
-                        </div>
                       </div>
                     </td>
                   </tr>
@@ -344,21 +322,6 @@ export default function EmployeesPage() {
                 <label className="text-xs font-bold text-slate-600">รหัส PIN 4 หลัก (สำหรับกดเปิดลิ้นชักที่หน้า POS)</label>
                 <input type="text" maxLength={4} pattern="\d{4}" title="กรุณากรอกตัวเลข 4 หลัก" value={formData.pin} onChange={e => setFormData({...formData, pin: e.target.value})} className="w-full border-2 border-amber-200 bg-amber-50 px-4 py-3 rounded-xl focus:outline-none focus:border-amber-500 font-black tracking-widest text-center text-amber-700 text-xl" placeholder="____" />
                 <p className="text-[10px] text-slate-400 text-center">ต้องเป็นตัวเลข 4 หลักเท่านั้น (เว้นว่างไว้ถ้าไม่ได้อยู่หน้าร้าน)</p>
-              </div>
-
-              <div className="border-t border-slate-100 pt-4">
-                <label className="flex items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 cursor-pointer">
-                  <div>
-                    <div className="text-xs font-black text-emerald-700">สิทธิ์อนุมัติการลบสต๊อก</div>
-                    <div className="text-[10px] text-emerald-600">อนุญาตให้ผู้ใช้นี้ยืนยันและทำรายการตัดสต๊อก / เบิกออก</div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={formData.isStockApprover}
-                    onChange={e => setFormData({ ...formData, isStockApprover: e.target.checked })}
-                    className="h-5 w-5 accent-emerald-600"
-                  />
-                </label>
               </div>
 
               <div className="space-y-1.5 border-t border-slate-100 pt-4 mt-2">

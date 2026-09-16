@@ -84,7 +84,7 @@ export default function InventoryCheckPage() {
       return false
     }
   })
-  const [approvers, setApprovers] = useState<Array<{ id: string; name: string; role: string; isStockApprover?: boolean }>>([])
+  const [approvers, setApprovers] = useState<Array<{ id: string; name: string; role: string }>>([])
   const [selectedApproverId, setSelectedApproverId] = useState('')
   const [approvalRequest, setApprovalRequest] = useState<{ isOpen: boolean; requestId?: string; product: InventoryProduct | null; qty: number; reason: string; time: string } | null>(null)
   const [isApproving, setIsApproving] = useState(false)
@@ -125,7 +125,7 @@ export default function InventoryCheckPage() {
   }, [])
 
   const fetchApprovers = useCallback(async () => {
-    const { data, error } = await supabase.from('employees').select('id, name, role, isStockApprover, isActive').eq('isActive', true)
+    const { data, error } = await supabase.from('employees').select('id, name, role, isActive').eq('isActive', true)
 
     if (error || !data) {
       setApprovers([])
@@ -135,8 +135,7 @@ export default function InventoryCheckPage() {
 
     const approvedEmployees = data.filter((employee) => {
       const role = String(employee.role || '')
-      const isApprover = Boolean(employee.isStockApprover)
-      return isApprover || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|manager|director|owner|admin|approver/i.test(role)
+      return /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|manager|director|owner|admin|approver/i.test(role)
     }).sort((a, b) => a.name.localeCompare(b.name, 'th'))
 
     setApprovers(approvedEmployees)
@@ -188,6 +187,19 @@ export default function InventoryCheckPage() {
     const nextQueue = [request, ...queue].slice(0, 200)
     writeStockApprovalQueue(nextQueue)
     setPendingApprovalCount(nextQueue.length)
+
+    void Promise.resolve(supabase.from('inbox_entries').insert([{
+      id: request.id,
+      type: 'stock_approval',
+      title: `อนุมัติการลบสต๊อก: ${product.name}`,
+      message: `${reason} • จำนวน ${qty.toLocaleString()} ชิ้น • ขอโดย ${employeeName}`,
+      created_at: request.requestedAt,
+      requested_by: employeeName,
+      product_id: product.id,
+      product_name: product.name,
+      qty: qty
+    }])).catch(() => undefined)
+
     return request
   }, [employeeName])
 
