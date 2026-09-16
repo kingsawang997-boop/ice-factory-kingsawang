@@ -29,10 +29,10 @@ type SettlementDetails = {
   revenue?: RevenueSummary
   bagTracking?: BagTracking
   cash?: CashSummary
-  debtorDetails?: DebtorDetailsPrint | null
+  debtorDetails?: DebtorDetailsPrint[] | null
   iceBreakdown?: IceBreakdown
   packBreakdown?: PackBreakdown
-  [key: string]: any
+  [key: string]: unknown
 }
 
 type SettlementRecord = {
@@ -75,11 +75,10 @@ export default function RouteSettlementPage() {
 
   const [isDebtorModalOpen, setIsDebtorModalOpen] = useState(false)
   const [debtorsList, setDebtorsList] = useState<Debtor[]>([])
-  const [tempDebtorId, setTempDebtorId] = useState('')
-  const [debtorItems, setDebtorItems] = useState<DebtorItem[]>([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
-  const [debtorDocNo, setDebtorDocNo] = useState('')
-  const [selectedDebtorId, setSelectedDebtorId] = useState('')
-  const [selectedDebtorName, setSelectedDebtorName] = useState('')
+  const [selectedDebtorEntries, setSelectedDebtorEntries] = useState<{ debtorId: string; debtorName: string; docNo: string; items: DebtorItem[]; total: number }[]>([])
+  const [draftDebtorId, setDraftDebtorId] = useState('')
+  const [draftDebtorDocNo, setDraftDebtorDocNo] = useState('')
+  const [draftDebtorItems, setDraftDebtorItems] = useState<DebtorItem[]>([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
 
   // 🌟 แก้ไข Type ให้ถูกต้อง ป้องกัน TS Error
   const [selectedDetailRecord, setSelectedDetailRecord] = useState<SettlementRecord | null>(null)
@@ -113,7 +112,7 @@ export default function RouteSettlementPage() {
     setPackReturns({ icePacks: 0, water1500: 0, water600: 0, water350: 0 })
     setWaterPromoSets({ water1500: 0, water600: 0, water350: 0 })
     setFinance({ transfer: 0, payArrears: 0, dailyArrears: 0, monthlyArrears: 0, actualCash: 0 })
-    setSelectedDebtorId(''); setSelectedDebtorName('')
+    setSelectedDebtorEntries([])
     
     setIsPullingData(true)
     const { data } = await supabase.from('route_settlements').select('details').eq('routeName', selectedTruck).eq('date', reportDate).eq('status', 'completed')
@@ -176,35 +175,66 @@ export default function RouteSettlementPage() {
     setIsDebtorModalOpen(true)
   }
 
-  const addDebtorItemRow = () => setDebtorItems([...debtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
+  const getDebtorTotal = (entries = selectedDebtorEntries) => entries.reduce((sum, item) => sum + Number(item.total || 0), 0)
+  const normalizeDebtorDetails = (details: DebtorDetailsPrint[] | DebtorDetailsPrint | null | undefined) => Array.isArray(details) ? details : details ? [details] : []
+  const draftDebtorTotalAmount = draftDebtorItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.price || 0)), 0)
+  const selectedDebtorTotalAmount = getDebtorTotal()
+  const selectedDebtorName = selectedDebtorEntries.map(item => item.debtorName).join(', ') || ''
+
+  const addDebtorItemRow = () => setDraftDebtorItems([...draftDebtorItems, { productName: 'น้ำแข็งหลอดเล็ก', qty: 1, price: 40 }])
   const updateDebtorItem = (index: number, field: keyof DebtorItem, value: string | number) => {
-    const newItems = [...debtorItems]
+    const newItems = [...draftDebtorItems]
     const item = { ...newItems[index] }
     if (field === 'productName') item.productName = String(value)
     else if (field === 'qty') item.qty = Number(value)
     else if (field === 'price') item.price = Number(value)
     newItems[index] = item
-    setDebtorItems(newItems)
+    setDraftDebtorItems(newItems)
   }
-  const removeDebtorItemRow = (index: number) => setDebtorItems(debtorItems.filter((_, idx) => idx !== index))
-  const totalDebtorCalculatedAmount = debtorItems.reduce((sum, item) => sum + (Number(item.qty || 0) * Number(item.price || 0)), 0)
+  const removeDebtorItemRow = (index: number) => setDraftDebtorItems(draftDebtorItems.filter((_, idx) => idx !== index))
+
+  const resetDebtorDraft = () => {
+    setDraftDebtorId('')
+    setDraftDebtorDocNo('')
+    setDraftDebtorItems([{ productName: 'น้ำแข็งหลอดใหญ่', qty: 1, price: 45 }])
+  }
+
+  const addDebtorEntry = () => {
+    if (!draftDebtorId) return alert('กรุณาเลือกลูกหนี้ในระบบ')
+    if (!draftDebtorDocNo) return alert('กรุณากรอกเลขที่เอกสารอ้างอิง')
+    if (draftDebtorTotalAmount <= 0) return alert('กรุณาเพิ่มรายการสินค้าและยอดเงินให้ถูกต้อง')
+
+    const debtorInfo = debtorsList.find(d => d.id === draftDebtorId)
+    if (!debtorInfo) return alert('ไม่พบข้อมูลลูกหนี้ที่เลือก')
+
+    const nextEntries = [...selectedDebtorEntries, {
+      debtorId: debtorInfo.id,
+      debtorName: debtorInfo.name,
+      docNo: draftDebtorDocNo,
+      items: draftDebtorItems.map(item => ({ ...item, qty: Number(item.qty || 0), price: Number(item.price || 0) })),
+      total: draftDebtorTotalAmount,
+    }]
+
+    setSelectedDebtorEntries(nextEntries)
+    setFinance(prev => ({ ...prev, monthlyArrears: getDebtorTotal(nextEntries) }))
+    resetDebtorDraft()
+  }
+
+  const removeSelectedDebtorEntry = (index: number) => {
+    const nextEntries = selectedDebtorEntries.filter((_, idx) => idx !== index)
+    setSelectedDebtorEntries(nextEntries)
+    setFinance(prev => ({ ...prev, monthlyArrears: getDebtorTotal(nextEntries) }))
+  }
 
   const confirmDebtor = () => {
-    if (!tempDebtorId) return alert('กรุณาเลือกลูกหนี้ในระบบ')
-    if (!debtorDocNo) return alert('กรุณากรอกเลขที่เอกสารอ้างอิง')
-    if (totalDebtorCalculatedAmount <= 0) return alert('กรุณาเพิ่มรายการสินค้าและยอดเงินให้ถูกต้อง')
-
-    const debtorInfo = debtorsList.find(d => d.id === tempDebtorId)
-    if(debtorInfo) {
-      setSelectedDebtorId(debtorInfo.id)
-      setSelectedDebtorName(debtorInfo.name)
-      setFinance(prev => ({ ...prev, monthlyArrears: totalDebtorCalculatedAmount }))
-      setIsDebtorModalOpen(false)
-    }
+    if (selectedDebtorEntries.length === 0) return alert('กรุณาเพิ่มลูกหนี้อย่างน้อย 1 รายการ')
+    setFinance(prev => ({ ...prev, monthlyArrears: selectedDebtorTotalAmount }))
+    setIsDebtorModalOpen(false)
   }
 
   const cancelDebtor = () => {
-    setSelectedDebtorId(''); setSelectedDebtorName(''); setTempDebtorId(''); setDebtorDocNo('')
+    setSelectedDebtorEntries([])
+    resetDebtorDraft()
     setFinance(prev => ({ ...prev, monthlyArrears: 0 }))
   }
 
@@ -256,26 +286,28 @@ export default function RouteSettlementPage() {
     }
 
     const docNo = `SET-${Date.now().toString().slice(-6)}`
-    
-    if (finance.monthlyArrears > 0 && selectedDebtorId) {
-      const { data: debtorData } = await supabase.from('debtors').select('outstanding').eq('id', selectedDebtorId).single()
-      
-      if (debtorData) {
-        const itemDesc = debtorItems.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
-        
-        await supabase.from('debtor_transactions').insert([{
-          id: `TRX-${Date.now()}`, 
-          debtor_id: selectedDebtorId, 
-          date: reportDate, 
-          type: 'borrow',
-          amount: finance.monthlyArrears, 
-          note: `[เลขที่เอกสาร: ${debtorDocNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`, 
-          items: debtorItems, 
-        }])
-        
-        await supabase.from('debtors').update({ 
-          outstanding: Number(debtorData.outstanding || 0) + Number(finance.monthlyArrears) 
-        }).eq('id', selectedDebtorId)
+
+    if (finance.monthlyArrears > 0 && selectedDebtorEntries.length > 0) {
+      for (const entry of selectedDebtorEntries) {
+        const { data: debtorData } = await supabase.from('debtors').select('outstanding').eq('id', entry.debtorId).single()
+
+        if (debtorData) {
+          const itemDesc = entry.items.map(i => `${i.productName} x${i.qty} (${i.qty * i.price}บ.)`).join(', ')
+
+          await supabase.from('debtor_transactions').insert([{
+            id: `TRX-${Date.now()}-${entry.debtorId}`,
+            debtor_id: entry.debtorId,
+            date: reportDate,
+            type: 'borrow',
+            amount: entry.total,
+            note: `[เลขที่เอกสาร: ${entry.docNo}] รายการ: ${itemDesc} (สายส่ง: ${selectedTruck})`,
+            items: entry.items,
+          }])
+
+          await supabase.from('debtors').update({
+            outstanding: Number(debtorData.outstanding || 0) + Number(entry.total)
+          }).eq('id', entry.debtorId)
+        }
       }
     }
 
@@ -284,7 +316,7 @@ export default function RouteSettlementPage() {
       revenue: { iceSales: iceRevenue, packSales: totalPackRevenue, total: totalRevenue },
       bagTracking: { grossLoad: morningLoad.totalIceBags, netLoad: netIceBags, returnedToStock: iceData.returned, melted: iceData.melted, soldAndService: totalSoldAndServiceBags, customerOwe: iceData.customerOweBags, customerReturnOld: iceData.customerReturnOldBags, expectedReturn: expectedEmptyBags, actualReturn: iceData.returnEmptyBags, lostBagsToDeduct: lostEmptyBags },
       cash: { expected: expectedCash, actual: finance.actualCash, diff: cashDifference },
-      debtorDetails: selectedDebtorId ? { debtorName: selectedDebtorName, docNo: debtorDocNo, items: debtorItems, total: finance.monthlyArrears } : null,
+      debtorDetails: selectedDebtorEntries.length > 0 ? selectedDebtorEntries.map(entry => ({ debtorName: entry.debtorName, docNo: entry.docNo, items: entry.items, total: entry.total })) : null,
       iceBreakdown: { sold50: iceData.sold50, sold45: iceData.sold45, sold40: iceData.sold40, sold35: iceData.sold35, sold32: iceData.sold32, service: iceData.service },
       packBreakdown: {
         icePacks: icePackSold,
@@ -330,6 +362,9 @@ export default function RouteSettlementPage() {
   const handleDelete = async (id: string) => {
     if(confirm(`⚠️ ต้องการลบบิล ${id} ออกจากระบบถาวรหรือไม่?`)) { await supabase.from('route_settlements').delete().eq('id', id); fetchHistory() }
   }
+
+  const debtorEntriesForDisplay = normalizeDebtorDetails(selectedDetailRecord?.details?.debtorDetails)
+  const printDebtorEntries = normalizeDebtorDetails(printSlip?.details?.debtorDetails)
 
   return (
     <>
@@ -573,11 +608,15 @@ export default function RouteSettlementPage() {
                 </table>
               </div>
 
-              {selectedDetailRecord.details?.debtorDetails && (
-                <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-xs space-y-1">
+              {debtorEntriesForDisplay.length > 0 && (
+                <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-xs space-y-2">
                   <p className="font-black text-rose-800">📌 บันทึกหนี้ค้างรายเดือน:</p>
-                  <p>ลูกหนี้: <span className="font-bold">{selectedDetailRecord.details.debtorDetails.debtorName}</span> (เลขที่เอกสาร: {selectedDetailRecord.details.debtorDetails.docNo})</p>
-                  <p>ยอดเงินหนี้: <span className="font-bold text-rose-600">{selectedDetailRecord.details.debtorDetails.total} บาท</span></p>
+                  {debtorEntriesForDisplay.map((entry, index) => (
+                    <div key={`${entry.debtorName}-${index}`} className="space-y-1 border-b border-rose-100 pb-2 last:border-b-0 last:pb-0">
+                      <p>ลูกหนี้: <span className="font-bold">{entry.debtorName}</span> (เลขที่เอกสาร: {entry.docNo})</p>
+                      <p>ยอดเงินหนี้: <span className="font-bold text-rose-600">{entry.total} บาท</span></p>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -593,26 +632,44 @@ export default function RouteSettlementPage() {
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-sm print:hidden">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
             <div className="p-6 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="font-black text-lg text-slate-800">📋 บันทึกค้างรายเดือน (เลือกลูกหนี้)</h3>
+              <h3 className="font-black text-lg text-slate-800">📋 บันทึกค้างรายเดือน (เลือกลูกหนี้หลายราย)</h3>
               <button onClick={() => setIsDebtorModalOpen(false)} className="text-slate-400 hover:text-rose-500 font-bold bg-white w-8 h-8 rounded-full shadow-sm">✕</button>
             </div>
             <div className="p-6 space-y-5 text-sm max-h-[75vh] overflow-y-auto">
-              
+              {selectedDebtorEntries.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="font-black text-slate-700 text-xs">ลูกหนี้ที่เลือกแล้ว</label>
+                    <span className="text-[10px] font-bold text-slate-500">{selectedDebtorEntries.length} รายการ</span>
+                  </div>
+                  <div className="space-y-2">
+                    {selectedDebtorEntries.map((entry, idx) => (
+                      <div key={`${entry.debtorId}-${idx}`} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div>
+                          <p className="font-black text-slate-800">{entry.debtorName}</p>
+                          <p className="text-[10px] text-slate-500">เลขที่เอกสาร: {entry.docNo} • ยอด {entry.total.toLocaleString()} บ.</p>
+                        </div>
+                        <button onClick={() => removeSelectedDebtorEntry(idx)} className="text-rose-500 font-bold hover:bg-rose-50 px-2 py-1 rounded">ลบ</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="font-bold text-slate-600 text-xs">เลือกลูกหนี้:</label>
-                  <select value={tempDebtorId} onChange={e => setTempDebtorId(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50 text-xs">
+                  <select value={draftDebtorId} onChange={e => setDraftDebtorId(e.target.value)} className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-blue-600 focus:border-blue-500 outline-none bg-slate-50 text-xs">
                     <option value="">-- กรุณาเลือกลูกหนี้ --</option>
                     {debtorsList.map(d => <option key={d.id} value={d.id}>{d.name} (ค้างเดิม: {d.outstanding || 0} บ.)</option>)}
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-600 text-xs">เลขที่เอกสารอ้างอิง:</label>
-                  <input type="text" value={debtorDocNo} onChange={e => setDebtorDocNo(e.target.value)} placeholder="เช่น INV-001 หรือเลขที่บิล" className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-slate-800 focus:border-blue-500 outline-none text-xs bg-slate-50" />
+                  <input type="text" value={draftDebtorDocNo} onChange={e => setDraftDebtorDocNo(e.target.value)} placeholder="เช่น INV-001 หรือเลขที่บิล" className="w-full p-3 rounded-xl border-2 border-slate-200 font-bold text-slate-800 focus:border-blue-500 outline-none text-xs bg-slate-50" />
                 </div>
               </div>
 
-              {/* ตารางรายการสินค้า */}
               <div className="space-y-2 pt-2">
                 <div className="flex justify-between items-center">
                   <label className="font-black text-slate-700 text-xs">1. รายการสินค้า & 2. ยอดเงินสินค้า:</label>
@@ -624,7 +681,7 @@ export default function RouteSettlementPage() {
                       <tr><th className="p-3 font-bold">ชื่อสินค้า</th><th className="p-3 font-bold text-center w-24">จำนวน</th><th className="p-3 font-bold text-right w-28">ราคา/หน่วย</th><th className="p-3 font-bold text-right w-28">รวม (บาท)</th><th className="p-3 w-12"></th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-xs">
-                      {debtorItems.map((item, idx) => (
+                      {draftDebtorItems.map((item, idx) => (
                         <tr key={idx}>
                           <td className="p-2"><input type="text" value={item.productName} onChange={e => updateDebtorItem(idx, 'productName', e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg font-bold" /></td>
                           <td className="p-2"><input type="number" min="1" value={item.qty} onChange={e => updateDebtorItem(idx, 'qty', Number(e.target.value))} className="w-full p-2 border border-slate-200 rounded-lg text-center font-bold" /></td>
@@ -638,15 +695,24 @@ export default function RouteSettlementPage() {
                 </div>
               </div>
 
-              {/* ยอดรวมสุทธิ */}
               <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex justify-between items-center">
-                <span className="font-bold text-blue-900 text-sm">3. ยอดรวมสุทธิทั้งหมด:</span>
-                <span className="font-black text-3xl text-blue-700">{totalDebtorCalculatedAmount.toLocaleString()} <span className="text-sm font-bold">บาท</span></span>
+                <span className="font-bold text-blue-900 text-sm">3. ยอดรวมสุทธิของลูกหนี้นี้:</span>
+                <span className="font-black text-3xl text-blue-700">{draftDebtorTotalAmount.toLocaleString()} <span className="text-sm font-bold">บาท</span></span>
               </div>
 
-              <button onClick={confirmDebtor} className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
-                ยืนยันบันทึกยอดหนี้ค้างรายเดือน
-              </button>
+              <div className="bg-slate-100 border border-slate-200 p-4 rounded-2xl flex justify-between items-center">
+                <span className="font-bold text-slate-700 text-sm">รวมค่าหนี้ค้างรายเดือนทั้งหมด:</span>
+                <span className="font-black text-2xl text-slate-900">{selectedDebtorTotalAmount.toLocaleString()} <span className="text-sm font-bold">บาท</span></span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <button onClick={addDebtorEntry} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
+                  + เพิ่มลูกหนี้นี้ลงรายการ
+                </button>
+                <button onClick={confirmDebtor} className="w-full bg-slate-900 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition-transform active:scale-95 text-base mt-2">
+                  ยืนยันลูกหนี้ทั้งหมด
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -760,10 +826,12 @@ export default function RouteSettlementPage() {
             </tbody>
           </table>
 
-          {printSlip.details?.debtorDetails && (
+          {printDebtorEntries.length > 0 && (
             <div className="border border-black p-2 mb-4 text-xs">
               <p className="font-bold underline">รายละเอียดหนี้ค้างรายเดือน:</p>
-              <p>ลูกหนี้: {printSlip.details.debtorDetails.debtorName} | เอกสาร: {printSlip.details.debtorDetails.docNo} | ยอดหนี้: {printSlip.details.debtorDetails.total} บาท</p>
+              {printDebtorEntries.map((entry, index) => (
+                <p key={`${entry.debtorName}-${index}`}>ลูกหนี้: {entry.debtorName} | เอกสาร: {entry.docNo} | ยอดหนี้: {entry.total} บาท</p>
+              ))}
             </div>
           )}
 
