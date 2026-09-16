@@ -47,6 +47,31 @@ export default function InventoryApprovalsPage() {
       return
     }
 
+    if (approved) {
+      const { data: atomicResult, error: atomicError } = await supabase.rpc('approve_stock_request', {
+        p_request_id: request.id,
+        p_reviewer: reviewerName
+      })
+
+      if (!atomicError && atomicResult) {
+        const approvedRequest: StockApprovalRequest = {
+          ...currentRequest,
+          status: 'approved',
+          reviewedBy: reviewerName,
+          reviewedAt: new Date().toISOString(),
+          note: 'อนุมัติแล้ว'
+        }
+        const remainingRequests = (await readStockApprovalRequests()).map((item) =>
+          item.id === request.id ? approvedRequest : item
+        )
+        await writeStockApprovalRequests(remainingRequests)
+        void syncApprovalInbox(approvedRequest, 'approved')
+        await refreshQueue()
+        alert('✅ อนุมัติคำขอเรียบร้อยแล้ว')
+        return
+      }
+    }
+
     const claimedRequest: StockApprovalRequest = {
       ...currentRequest,
       status: 'approved',
