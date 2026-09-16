@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { cookies } from 'next/headers'
-import { getServerSupabase } from '@/lib/server-supabase'
+import { supabase } from '@/lib/supabase'
 
 const SESSION_COOKIE = 'kingsawang_server_session'
 const sessionSecret = process.env.APP_SESSION_SECRET || randomBytes(32).toString('hex')
@@ -65,7 +65,7 @@ export const getServerEmployee = async (): Promise<Employee | null> => {
   const session = await readSession()
   if (!session) return null
 
-  const { data, error } = await getServerSupabase()
+  const { data, error } = await supabase
     .from('employees')
     .select('id, name, role, isActive')
     .eq('id', session.employeeId)
