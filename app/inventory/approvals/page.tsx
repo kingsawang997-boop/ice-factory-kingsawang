@@ -1,0 +1,164 @@
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import { supabase } from '@/lib/supabase'
+
+type ApprovalQueueItem = {
+  id: string
+  productId: string
+  productName: string
+  qty: number
+  reason: string
+  requestedBy: string
+  requestedAt: string
+  status: 'pending'
+}
+
+const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
+
+const createLogId = () => `LOG-${Date.now()}`
+
+function readStockApprovalQueue(): ApprovalQueueItem[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(STOCK_APPROVAL_QUEUE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as ApprovalQueueItem[] : []
+  } catch {
+    return []
+  }
+}
+
+function writeStockApprovalQueue(items: ApprovalQueueItem[]) {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(STOCK_APPROVAL_QUEUE_KEY, JSON.stringify(items))
+}
+
+export default function StockApprovalQueuePage() {
+  const [requests, setRequests] = useState<ApprovalQueueItem[]>(() => readStockApprovalQueue())
+  const [sessionName] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return ''
+      return JSON.parse(session)?.name || ''
+    } catch {
+      return ''
+    }
+  })
+  const [isApprover] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return false
+      const parsed = JSON.parse(session)
+      const role = String(parsed?.role || '')
+      return Boolean(parsed?.isStockApprover) || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+    } catch {
+      return false
+    }
+  })
+  const [isLoading] = useState(false)
+
+  const handleApprove = async (request: ApprovalQueueItem) => {
+    if (!isApprover) {
+      alert('❌ คุณไม่มีสิทธิ์อนุมัติการลบสต๊อก')
+      return
+    }
+
+    const { data: product, error } = await supabase.from('products').select('*').eq('id', request.productId).single()
+    if (error || !product) {
+      alert('❌ ไม่พบสินค้าในระบบ กรุณาตรวจสอบข้อมูลอีกครั้ง')
+      return
+    }
+
+    const newStock = Number(product.stock || 0) - Number(request.qty)
+    if (newStock < 0) {
+      alert('❌ ยอดคงเหลือห้ามติดลบหลังอนุมัติ')
+      return
+    }
+
+    await supabase.from('products').update({ stock: newStock }).eq('id', request.productId)
+    await supabase.from('inventory_logs').insert([{
+      id: createLogId(),
+      date: new Date().toISOString(),
+      product_id: request.productId,
+      product_name: request.productName,
+      type: 'OUT',
+      qty: request.qty,
+      note: `${request.reason} (อนุมัติจากคิวโดย ${sessionName || 'ผู้อนุมัติ'})`,
+      by: sessionName || 'ผู้อนุมัติ'
+    }])
+
+    const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
+    writeStockApprovalQueue(queue)
+    setRequests(queue)
+    alert('✅ อนุมัติคำขอลบสต๊อกสำเร็จ')
+  }
+
+  const handleReject = (request: ApprovalQueueItem) => {
+    if (!isApprover) {
+      alert('❌ คุณไม่มีสิทธิ์ปฏิเสธคำขออนุมัติ')
+      return
+    }
+
+    const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
+    writeStockApprovalQueue(queue)
+    setRequests(queue)
+    alert('❌ ปฏิเสธคำขออนุมัติแล้ว')
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-6 text-sm font-sans">
+      <div className="mx-auto max-w-6xl space-y-6">
+        <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-rose-500">Approval Queue</p>
+            <h1 className="mt-2 text-2xl font-black text-slate-900">คิวอนุมัติการลบสต๊อก</h1>
+          </div>
+          <div className="flex gap-3">
+            <Link href="/inventory" className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-xl font-bold transition-all">← กลับหน้าคลัง</Link>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-400 font-black">⏳ กำลังโหลดคิวอนุมัติ...</div>
+        ) : !isApprover ? (
+          <div className="bg-rose-50 border border-rose-200 rounded-[2rem] p-8 text-center">
+            <div className="text-5xl mb-3">🔒</div>
+            <h2 className="text-xl font-black text-rose-700">ไม่มีสิทธิ์อนุมัติ</h2>
+            <p className="mt-2 text-sm text-rose-600 font-bold">เฉพาะผู้บริหารหรือพนักงานที่ได้รับแต่งตั้งเท่านั้นที่สามารถดูและตอบรับคำขอนี้</p>
+          </div>
+        ) : requests.length === 0 ? (
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-10 text-center text-slate-400 font-black">ไม่มีคำขออนุมัติสำหรับตัดสต๊อกในขณะนี้</div>
+        ) : (
+          <div className="space-y-4">
+            {requests.map((request) => (
+              <div key={request.id} className="bg-white rounded-[2rem] border border-slate-200 shadow-sm p-5">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full text-[10px] font-black">รอดำเนินการ</span>
+                      <span className="text-[10px] text-slate-400 font-bold">{new Date(request.requestedAt).toLocaleString('th-TH')}</span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-black text-slate-800">{request.productName}</h3>
+                    <p className="mt-1 text-sm text-slate-600 font-bold">จำนวน: {request.qty.toLocaleString()} ชิ้น</p>
+                    <p className="mt-1 text-sm text-slate-500">เหตุผล: {request.reason}</p>
+                    <p className="mt-2 text-[11px] text-slate-400 font-bold">ขอโดย: {request.requestedBy}</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <button onClick={() => void handleApprove(request)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-xl font-black shadow-lg shadow-emerald-500/20 transition-all active:scale-95">✅ อนุมัติ</button>
+                    <button onClick={() => handleReject(request)} className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-3 rounded-xl font-black shadow-lg shadow-rose-500/20 transition-all active:scale-95">❌ ปฏิเสธ</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

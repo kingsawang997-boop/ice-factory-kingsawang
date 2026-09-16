@@ -40,7 +40,7 @@ export default function LoginPage() {
     // 1. ตรวจสอบ Username / Password
     const { data: user, error } = await supabase
       .from('employees')
-      .select('id, name, role, isActive')
+      .select('id, name, role, isActive, isStockApprover')
       .eq('username', username)
       .eq('password', password)
       .single()
@@ -58,10 +58,14 @@ export default function LoginPage() {
     }
 
     // 2. ถ้าล็อกอินสำเร็จ ให้เก็บข้อมูลลง LocalStorage (จำลอง Session)
+    const role = String(user.role || '')
+    const isStockApprover = /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+
     const sessionData = {
       id: user.id,
       name: user.name,
-      role: user.role,
+      role,
+      isStockApprover: Boolean(user.isStockApprover) || isStockApprover,
       loginAt: new Date().getTime()
     }
     

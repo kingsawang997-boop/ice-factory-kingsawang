@@ -10,6 +10,26 @@ type TabletNavProps = { pathname: string; employeeName: string }
 type InventoryProduct = { id: string; name: string; category: string; price: number; unit?: string; stock?: number; image?: string; icon?: string }
 type InventoryLog = { id: string; date?: string; product_id: string; product_name: string; type: 'IN' | 'OUT'; qty: number; note?: string; by: string }
 type NumpadState = { isOpen: boolean; type: 'IN' | 'OUT'; product: InventoryProduct | null; value: string; time: string; reason: string }
+type ApprovalQueueItem = { id: string; productId: string; productName: string; qty: number; reason: string; requestedBy: string; requestedAt: string; status: 'pending' }
+
+const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
+
+function readStockApprovalQueue(): ApprovalQueueItem[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(STOCK_APPROVAL_QUEUE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as ApprovalQueueItem[] : []
+  } catch {
+    return []
+  }
+}
+
+function writeStockApprovalQueue(items: ApprovalQueueItem[]) {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(STOCK_APPROVAL_QUEUE_KEY, JSON.stringify(items))
+}
 
 function TabletNav({ pathname, employeeName }: TabletNavProps) {
   return (
@@ -18,6 +38,7 @@ function TabletNav({ pathname, employeeName }: TabletNavProps) {
       <div className="flex bg-white rounded-xl p-1 border border-slate-200 shadow-sm shrink-0">
         <Link href="/sales/pos" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 POS</Link>
         <Link href="/inventory" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 เช็คคลังสินค้า</Link>
+        <Link href="/inventory/approvals" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/approvals' ? 'bg-rose-50 text-rose-700' : 'text-slate-500 hover:bg-slate-50'}`}>🔐 คิวอนุมัติ</Link>
         <Link href="/inventory/truck-loading" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายของขึ้นรถ</Link>
         <Link href="/trucks/maintenance" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/trucks/maintenance' ? 'bg-purple-50 text-purple-700' : 'text-slate-500 hover:bg-slate-50'}`}>🔧 ซ่อมบำรุงรถ</Link>
       </div>
@@ -35,13 +56,61 @@ export default function InventoryCheckPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const pathname = usePathname()
   
-  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
+  const [employeeName] = useState(() => {
+    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
+
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return 'กำลังโหลดชื่อ...'
+      return JSON.parse(session)?.name || 'กำลังโหลดชื่อ...'
+    } catch {
+      return 'กำลังโหลดชื่อ...'
+    }
+  })
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
+  const [canApproveStockOut] = useState(() => {
+    if (typeof window === 'undefined') return false
+
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return false
+
+      const parsedSession = JSON.parse(session)
+      const role = String(parsedSession?.role || '')
+      const directPermission = Boolean(parsedSession?.isStockApprover || parsedSession?.canApproveStock || parsedSession?.permissions?.stockApproval)
+
+      return directPermission || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+    } catch {
+      return false
+    }
+  })
+  const [approvers, setApprovers] = useState<Array<{ id: string; name: string; role: string; isStockApprover?: boolean }>>([])
+  const [selectedApproverId, setSelectedApproverId] = useState('')
+  const [approvalRequest, setApprovalRequest] = useState<{ isOpen: boolean; requestId?: string; product: InventoryProduct | null; qty: number; reason: string; time: string } | null>(null)
+  const [isApproving, setIsApproving] = useState(false)
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0)
   
   // 🌟 เริ่มต้นที่หน้ากระสอบเปล่าเลย (ตามที่คุณต้องการดู)
   const [activeCategory, setActiveCategory] = useState<'main' | 'packaging'>('packaging')
 
   const [numpad, setNumpad] = useState<NumpadState>({ isOpen: false, type: 'IN', product: null, value: '0', time: '', reason: '' })
+
+  const checkStockApprovalPermission = useCallback(() => {
+    if (typeof window === 'undefined') return false
+
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return false
+
+      const parsedSession = JSON.parse(session)
+      const role = String(parsedSession?.role || '')
+      const directPermission = Boolean(parsedSession?.isStockApprover || parsedSession?.canApproveStock || parsedSession?.permissions?.stockApproval)
+
+      return directPermission || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+    } catch {
+      return false
+    }
+  }, [])
 
   const fetchInventory = useCallback(async () => {
     setIsLoading(true)
@@ -55,13 +124,40 @@ export default function InventoryCheckPage() {
     setIsLoading(false)
   }, [])
 
+  const fetchApprovers = useCallback(async () => {
+    const { data, error } = await supabase.from('employees').select('id, name, role, isStockApprover, isActive').eq('isActive', true)
+
+    if (error || !data) {
+      setApprovers([])
+      setSelectedApproverId('')
+      return []
+    }
+
+    const approvedEmployees = data.filter((employee) => {
+      const role = String(employee.role || '')
+      const isApprover = Boolean(employee.isStockApprover)
+      return isApprover || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|manager|director|owner|admin|approver/i.test(role)
+    }).sort((a, b) => a.name.localeCompare(b.name, 'th'))
+
+    setApprovers(approvedEmployees)
+    setSelectedApproverId(approvedEmployees[0]?.id || '')
+    return approvedEmployees
+  }, [])
+
   useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    void fetchInventory()
+    const loadInitialData = async () => {
+      await fetchInventory()
+      setPendingApprovalCount(readStockApprovalQueue().length)
+    }
+    void loadInitialData()
   }, [fetchInventory])
 
   const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
+    if (type === 'OUT' && !canApproveStockOut) {
+      alert('❌ การลบสต็อกต้องได้รับอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้งก่อน จึงสามารถทำรายการได้')
+      return
+    }
+
     const now = new Date()
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     
@@ -76,12 +172,45 @@ export default function InventoryCheckPage() {
   const handleNumPress = (num: string) => setNumpad(prev => ({ ...prev, value: prev.value === '0' ? num : prev.value + num }))
   const handleBackspace = () => setNumpad(prev => ({ ...prev, value: prev.value.length > 1 ? prev.value.slice(0, -1) : '0' }))
 
+  const sendApprovalRequest = useCallback((product: InventoryProduct, qty: number, reason: string) => {
+    const queue = readStockApprovalQueue()
+    const request: ApprovalQueueItem = {
+      id: `REQ-${Date.now()}`,
+      productId: product.id,
+      productName: product.name,
+      qty,
+      reason,
+      requestedBy: employeeName,
+      requestedAt: new Date().toISOString(),
+      status: 'pending'
+    }
+
+    const nextQueue = [request, ...queue].slice(0, 200)
+    writeStockApprovalQueue(nextQueue)
+    setPendingApprovalCount(nextQueue.length)
+    return request
+  }, [employeeName])
+
   const submitStockChange = async () => {
     const qty = Number(numpad.value)
     const product = numpad.product
     
     if (qty <= 0) return alert('กรุณาระบุจำนวนที่ต้องการทำรายการ')
     if (!product) return
+
+    if (numpad.type === 'OUT' && !checkStockApprovalPermission()) {
+      const approversList = await fetchApprovers()
+      if (!approversList.length) {
+        alert('❌ ไม่พบผู้อนุมัติที่มีสิทธิ์ในการลบสต็อก กรุณาติดต่อผู้ดูแลระบบ')
+        return
+      }
+
+      setNumpad(prev => ({ ...prev, isOpen: false }))
+      const request = sendApprovalRequest(product, qty, numpad.reason)
+      setApprovalRequest({ isOpen: true, requestId: request.id, product, qty, reason: numpad.reason, time: numpad.time })
+      alert(`✅ ส่งคำขออนุมัติแล้ว\nสินค้า: ${request.productName}\nจำนวน: ${request.qty.toLocaleString()} ชิ้น\nกรุณาตรวจสอบที่เมนู คิวอนุมัติ`)
+      return
+    }
 
     const newStock = numpad.type === 'IN' ? Number(product.stock || 0) + qty : Number(product.stock || 0) - qty
     if (newStock < 0) return alert('❌ ยอดคงเหลือห้ามติดลบ! (สต๊อกไม่พอเบิก)')
@@ -99,7 +228,47 @@ export default function InventoryCheckPage() {
 
     alert(`✅ ${numpad.type === 'IN' ? 'รับเข้า' : 'เบิกออก'}สต๊อกสำเร็จ!`)
     setNumpad(prev => ({ ...prev, isOpen: false }))
-    fetchInventory()
+    void fetchInventory()
+  }
+
+  const approveStockOut = async () => {
+    if (!approvalRequest?.product) return
+    if (!selectedApproverId) return alert('❌ กรุณาเลือกผู้อนุมัติก่อนยืนยัน')
+
+    const approvedBy = approvers.find((approver) => approver.id === selectedApproverId)
+    const qty = approvalRequest.qty
+    const product = approvalRequest.product
+    const newStock = Number(product.stock || 0) - qty
+
+    if (newStock < 0) return alert('❌ ยอดคงเหลือห้ามติดลบ! (สต๊อกไม่พอเบิก)')
+
+    setIsApproving(true)
+
+    try {
+      await supabase.from('products').update({ stock: newStock }).eq('id', product.id)
+
+      await supabase.from('inventory_logs').insert([{
+        id: `LOG-${Date.now()}`,
+        date: new Date().toISOString(),
+        product_id: product.id,
+        product_name: product.name,
+        type: 'OUT',
+        qty,
+        note: `${approvalRequest.reason} (ได้รับอนุมัติจาก ${approvedBy?.name || 'ผู้อนุมัติ'})`,
+        by: `${employeeName} • อนุมัติโดย ${approvedBy?.name || 'ผู้อนุมัติ'}`
+      }])
+
+      const queued = readStockApprovalQueue().filter(item => item.id !== approvalRequest.requestId)
+      writeStockApprovalQueue(queued)
+      setPendingApprovalCount(queued.length)
+
+      alert('✅ การลบสต๊อกได้รับอนุมัติแล้วและบันทึกสำเร็จ!')
+      setApprovalRequest(null)
+      setSelectedApproverId(approvers[0]?.id || '')
+      void fetchInventory()
+    } finally {
+      setIsApproving(false)
+    }
   }
 
   const displayedProducts = products.filter(p => p.category === activeCategory && p.name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -182,7 +351,11 @@ export default function InventoryCheckPage() {
           )}
 
           {/* ช่องค้นหา + ปุ่มประวัติ */}
-          <div className="flex gap-2 lg:w-[350px]">
+          <div className="flex gap-2 lg:w-[430px]">
+            <Link href="/inventory/approvals" className="bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 px-3 rounded-2xl font-black flex items-center gap-2 shadow-sm active:scale-95 transition-all text-[10px] h-full shrink-0 relative">
+              🔐 คิวอนุมัติ
+              {pendingApprovalCount > 0 && <span className="bg-rose-500 text-white min-w-5 h-5 rounded-full flex items-center justify-center text-[9px] px-1">{pendingApprovalCount}</span>}
+            </Link>
             <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
               <input type="text" placeholder="ค้นหาสินค้า..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-3 rounded-2xl border border-slate-200 focus:outline-none focus:border-blue-500 font-bold text-slate-700 bg-white shadow-sm text-xs h-full" />
@@ -268,7 +441,7 @@ export default function InventoryCheckPage() {
             </div>
             <div className="p-6 space-y-4">
               <div className="text-center space-y-1"><p className="text-[10px] font-bold text-slate-500">สินค้าที่ทำรายการ</p><p className="font-black text-lg text-slate-800 line-clamp-1">{numpad.product.name}</p></div>
-              
+               
               <div className="space-y-1.5">
                 <label className="text-[10px] font-bold text-slate-500 uppercase">เหตุผล / หมวดหมู่</label>
                 <select 
@@ -302,15 +475,59 @@ export default function InventoryCheckPage() {
               <div className={`p-4 rounded-2xl border-2 flex justify-between items-center bg-slate-50 ${numpad.type === 'IN' ? 'border-emerald-200' : 'border-rose-200'}`}>
                 <span className="text-xs font-bold text-slate-400">จำนวน:</span><span className={`text-4xl font-black tracking-tight ${numpad.type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}`}>{Number(numpad.value).toLocaleString()}</span>
               </div>
-              
+               
               <div className="grid grid-cols-3 gap-2 pt-2">
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (<button key={num} onClick={() => handleNumPress(num.toString())} className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xl py-3 rounded-xl shadow-sm active:scale-95 transition-all">{num}</button>))}
                 <button onClick={() => setNumpad(prev => ({...prev, value: '0'}))} className="bg-rose-50 hover:bg-rose-100 text-rose-500 font-black text-sm py-3 rounded-xl shadow-sm active:scale-95 transition-all">ล้าง</button>
                 <button onClick={() => handleNumPress('0')} className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xl py-3 rounded-xl shadow-sm active:scale-95 transition-all">0</button>
                 <button onClick={handleBackspace} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-lg py-3 rounded-xl shadow-sm active:scale-95 transition-all">⌫</button>
               </div>
-              
+               
               <button onClick={submitStockChange} className={`w-full text-white font-black py-4 rounded-xl shadow-lg mt-2 text-sm active:scale-95 transition-transform ${numpad.type === 'IN' ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30' : 'bg-rose-500 hover:bg-rose-600 shadow-rose-500/30'}`}>{numpad.type === 'IN' ? '💾 ยืนยันรับเข้าสต๊อก' : '💾 ยืนยันทำรายการ'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {approvalRequest?.isOpen && approvalRequest.product && (
+        <div className="fixed inset-0 z-[2100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm print:hidden">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="bg-rose-50 border-b border-rose-100 p-5 flex justify-between items-center">
+              <h3 className="font-black text-base text-rose-700 flex items-center gap-2">🔐 ต้องได้รับอนุมัติ</h3>
+              <button onClick={() => setApprovalRequest(null)} className="w-8 h-8 rounded-full bg-white text-slate-400 font-bold hover:text-rose-500 shadow-sm border border-slate-200">✕</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4">
+                <p className="text-[10px] font-bold text-rose-500 uppercase">การลบสต๊อก</p>
+                <p className="font-black text-lg text-slate-800 mt-1">{approvalRequest.product.name}</p>
+                <p className="text-sm font-bold text-slate-600 mt-2">จำนวน: {approvalRequest.qty.toLocaleString()} ชิ้น</p>
+                <p className="text-xs text-slate-500 mt-1">เหตุผล: {approvalRequest.reason}</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">เลือกผู้อนุมัติ</label>
+                <select
+                  value={selectedApproverId}
+                  onChange={(e) => setSelectedApproverId(e.target.value)}
+                  className="w-full border-2 border-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-rose-500"
+                >
+                  {approvers.length === 0 ? <option value="">ไม่มีผู้อนุมัติ</option> : approvers.map((approver) => (
+                    <option key={approver.id} value={approver.id}>{approver.name} ({approver.role})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] font-bold text-amber-800">
+                การลบสต็อกต้องได้รับอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้งก่อนจึงสามารถบันทึกได้
+              </div>
+
+              <button
+                onClick={approveStockOut}
+                disabled={isApproving || approvers.length === 0}
+                className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-slate-300 text-white font-black py-4 rounded-xl shadow-lg shadow-rose-500/30 active:scale-95 transition-transform"
+              >
+                {isApproving ? '⏳ กำลังอนุมัติ...' : '✅ ยืนยันอนุมัติและตัดสต๊อก'}
+              </button>
             </div>
           </div>
         </div>
