@@ -37,27 +37,20 @@ export default function LoginPage() {
     setIsLoading(true)
     setErrorMsg('')
 
-    // 1. ตรวจสอบ Username / Password
-    const { data: user, error } = await supabase
-      .from('employees')
-      .select('id, name, role, isActive')
-      .eq('username', username)
-      .eq('password', password)
-      .single()
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    })
+    const result = await response.json().catch(() => null) as { user?: { id: string; name: string; role: string; isActive: boolean }; error?: string } | null
 
-    if (error || !user) {
-      setErrorMsg(error?.message ?? '❌ ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง')
+    if (!response.ok || !result?.user) {
+      setErrorMsg(`❌ ${result?.error || 'เข้าสู่ระบบไม่สำเร็จ'}`)
       setIsLoading(false)
       return
     }
 
-    if (!user.isActive) {
-      setErrorMsg('❌ บัญชีนี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ')
-      setIsLoading(false)
-      return
-    }
-
-    // 2. ถ้าล็อกอินสำเร็จ ให้เก็บข้อมูลลง LocalStorage (จำลอง Session)
+    const user = result.user
     const role = String(user.role || '')
     const isStockApprover = /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
 
@@ -71,7 +64,6 @@ export default function LoginPage() {
     
     localStorage.setItem('kingsawang_session', JSON.stringify(sessionData))
     
-    // 3. พาไปหน้าแรก
     router.push('/')
   }
 

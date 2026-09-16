@@ -11,6 +11,7 @@ type ApprovalQueueItem = {
   qty: number
   reason: string
   requestedBy: string
+  requestedById?: string
   requestedAt: string
   status: 'pending'
 }
@@ -50,11 +51,21 @@ export default function StockApprovalQueuePage() {
       return ''
     }
   })
+  const [sessionId] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return ''
+      return String(JSON.parse(session)?.id || '')
+    } catch {
+      return ''
+    }
+  })
   const [isApprover, setIsApprover] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    const refreshStatus = () => {
+    const refreshStatus = async () => {
       if (typeof window === 'undefined') return
       try {
         const session = localStorage.getItem('kingsawang_session')
@@ -66,8 +77,12 @@ export default function StockApprovalQueuePage() {
         }
 
         const parsed = JSON.parse(session)
-        const role = String(parsed?.role || '')
-        setIsApprover(Boolean(parsed?.isStockApprover) || isStockApproverRole(role))
+        const { data: employee } = await supabase
+          .from('employees')
+          .select('id, role, isActive')
+          .eq('id', parsed?.id || '')
+          .single()
+        setIsApprover(Boolean(employee?.isActive) && isStockApproverRole(String(employee?.role || '')))
       } catch {
         setIsApprover(false)
       }
@@ -87,6 +102,7 @@ export default function StockApprovalQueuePage() {
       const { data, error } = await supabase.from('inbox_entries').select('*').limit(100)
       if (!error && Array.isArray(data)) {
         const inboxItems = data
+          .filter((entry) => !['approved', 'rejected'].includes(String(entry?.status || '').toLowerCase()))
           .filter((entry) => entry?.type === 'stock_approval' || entry?.kind === 'stock_approval' || /อนุมัติ.*สต็อก|stock.*approval/i.test(String(entry?.message || entry?.title || '')))
           .map((entry) => ({
             id: String(entry?.id || `inbox-${Date.now()}`),
@@ -95,6 +111,7 @@ export default function StockApprovalQueuePage() {
             qty: Number(entry?.qty || entry?.quantity || 0),
             reason: String(entry?.reason || entry?.message || 'จัดการสต๊อก'),
             requestedBy: String(entry?.requested_by || entry?.sender || entry?.owner || 'ระบบ'),
+            requestedById: entry?.requested_by_id ? String(entry.requested_by_id) : undefined,
             requestedAt: String(entry?.created_at || entry?.createdAt || new Date().toISOString()),
             status: 'pending' as const
           }))
@@ -112,34 +129,26 @@ export default function StockApprovalQueuePage() {
   }
 
   const handleApprove = async (request: ApprovalQueueItem) => {
-    if (!isApprover) {
+    if (!isApprover || !sessionId) {
       alert('❌ คุณไม่มีสิทธิ์อนุมัติการลบสต๊อก')
       return
     }
 
-    const { data: product, error } = await supabase.from('products').select('*').eq('id', request.productId).single()
-    if (error || !product) {
-      alert('❌ ไม่พบสินค้าในระบบ กรุณาตรวจสอบข้อมูลอีกครั้ง')
+    if (request.requestedById && request.requestedById === sessionId) {
+      alert('❌ ผู้ขอรายการไม่สามารถอนุมัติคำขอของตัวเองได้')
       return
     }
 
-    const newStock = Number(product.stock || 0) - Number(request.qty)
-    if (newStock < 0) {
-      alert('❌ ยอดคงเหลือห้ามติดลบหลังอนุมัติ')
+    const response = await fetch('/api/stock-approvals/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: request.id })
+    })
+    const result = await response.json().catch(() => null) as { error?: string } | null
+    if (!response.ok) {
+      alert(`❌ ${result?.error || 'อนุมัติคำขอไม่สำเร็จ'}`)
       return
     }
-
-    await supabase.from('products').update({ stock: newStock }).eq('id', request.productId)
-    await supabase.from('inventory_logs').insert([{
-      id: createLogId(),
-      date: new Date().toISOString(),
-      product_id: request.productId,
-      product_name: request.productName,
-      type: 'OUT',
-      qty: request.qty,
-      note: `${request.reason} (อนุมัติจากคิวโดย ${sessionName || 'ผู้อนุมัติ'})`,
-      by: sessionName || 'ผู้อนุมัติ'
-    }])
 
     const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
     writeStockApprovalQueue(queue)
@@ -157,6 +166,11 @@ export default function StockApprovalQueuePage() {
     const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
     writeStockApprovalQueue(queue)
     setRequests(queue)
+    void supabase.from('inbox_entries').update({
+      status: 'rejected',
+      rejected_by: sessionId,
+      rejected_at: new Date().toISOString()
+    }).eq('id', request.id)
     void refreshQueue()
     alert('❌ ปฏิเสธคำขออนุมัติแล้ว')
   }

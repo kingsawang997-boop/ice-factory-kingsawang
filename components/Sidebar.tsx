@@ -45,6 +45,7 @@ export default function Sidebar() {
 
   const handleLogout = () => {
     if (confirm('คุณต้องการออกจากระบบ ใช่หรือไม่?')) {
+      void fetch('/api/auth/logout', { method: 'POST' })
       localStorage.removeItem('kingsawang_session')
       window.location.href = '/login'
     }

@@ -10,7 +10,7 @@ type TabletNavProps = { pathname: string; employeeName: string }
 type InventoryProduct = { id: string; name: string; category: string; price: number; unit?: string; stock?: number; image?: string; icon?: string }
 type InventoryLog = { id: string; date?: string; product_id: string; product_name: string; type: 'IN' | 'OUT'; qty: number; note?: string; by: string }
 type NumpadState = { isOpen: boolean; type: 'IN' | 'OUT'; product: InventoryProduct | null; value: string; time: string; reason: string }
-type ApprovalQueueItem = { id: string; productId: string; productName: string; qty: number; reason: string; requestedBy: string; requestedAt: string; status: 'pending' }
+type ApprovalQueueItem = { id: string; productId: string; productName: string; qty: number; reason: string; requestedBy: string; requestedById?: string; requestedAt: string; status: 'pending' }
 
 const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
 
@@ -68,26 +68,8 @@ export default function InventoryCheckPage() {
     }
   })
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
-  const [canApproveStockOut] = useState(() => {
-    if (typeof window === 'undefined') return false
-
-    try {
-      const session = localStorage.getItem('kingsawang_session')
-      if (!session) return false
-
-      const parsedSession = JSON.parse(session)
-      const role = String(parsedSession?.role || '')
-      const directPermission = Boolean(parsedSession?.isStockApprover || parsedSession?.canApproveStock || parsedSession?.permissions?.stockApproval)
-
-      return directPermission || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
-    } catch {
-      return false
-    }
-  })
   const [approvers, setApprovers] = useState<Array<{ id: string; name: string; role: string }>>([])
-  const [selectedApproverId, setSelectedApproverId] = useState('')
   const [approvalRequest, setApprovalRequest] = useState<{ isOpen: boolean; requestId?: string; product: InventoryProduct | null; qty: number; reason: string; time: string } | null>(null)
-  const [isApproving, setIsApproving] = useState(false)
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0)
   
   // 🌟 เริ่มต้นที่หน้ากระสอบเปล่าเลย (ตามที่คุณต้องการดู)
@@ -129,7 +111,6 @@ export default function InventoryCheckPage() {
 
     if (error || !data) {
       setApprovers([])
-      setSelectedApproverId('')
       return []
     }
 
@@ -139,7 +120,6 @@ export default function InventoryCheckPage() {
     }).sort((a, b) => a.name.localeCompare(b.name, 'th'))
 
     setApprovers(approvedEmployees)
-    setSelectedApproverId(approvedEmployees[0]?.id || '')
     return approvedEmployees
   }, [])
 
@@ -152,11 +132,6 @@ export default function InventoryCheckPage() {
   }, [fetchInventory])
 
   const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
-    if (type === 'OUT' && !canApproveStockOut) {
-      alert('❌ การลบสต็อกต้องได้รับอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้งก่อน จึงสามารถทำรายการได้')
-      return
-    }
-
     const now = new Date()
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     
@@ -180,6 +155,13 @@ export default function InventoryCheckPage() {
       qty,
       reason,
       requestedBy: employeeName,
+      requestedById: (() => {
+        try {
+          return JSON.parse(localStorage.getItem('kingsawang_session') || '{}')?.id || undefined
+        } catch {
+          return undefined
+        }
+      })(),
       requestedAt: new Date().toISOString(),
       status: 'pending'
     }
@@ -195,6 +177,7 @@ export default function InventoryCheckPage() {
       message: `${reason} • จำนวน ${qty.toLocaleString()} ชิ้น • ขอโดย ${employeeName}`,
       created_at: request.requestedAt,
       requested_by: employeeName,
+      requested_by_id: request.requestedById || null,
       product_id: product.id,
       product_name: product.name,
       qty: qty
@@ -241,46 +224,6 @@ export default function InventoryCheckPage() {
     alert(`✅ ${numpad.type === 'IN' ? 'รับเข้า' : 'เบิกออก'}สต๊อกสำเร็จ!`)
     setNumpad(prev => ({ ...prev, isOpen: false }))
     void fetchInventory()
-  }
-
-  const approveStockOut = async () => {
-    if (!approvalRequest?.product) return
-    if (!selectedApproverId) return alert('❌ กรุณาเลือกผู้อนุมัติก่อนยืนยัน')
-
-    const approvedBy = approvers.find((approver) => approver.id === selectedApproverId)
-    const qty = approvalRequest.qty
-    const product = approvalRequest.product
-    const newStock = Number(product.stock || 0) - qty
-
-    if (newStock < 0) return alert('❌ ยอดคงเหลือห้ามติดลบ! (สต๊อกไม่พอเบิก)')
-
-    setIsApproving(true)
-
-    try {
-      await supabase.from('products').update({ stock: newStock }).eq('id', product.id)
-
-      await supabase.from('inventory_logs').insert([{
-        id: `LOG-${Date.now()}`,
-        date: new Date().toISOString(),
-        product_id: product.id,
-        product_name: product.name,
-        type: 'OUT',
-        qty,
-        note: `${approvalRequest.reason} (ได้รับอนุมัติจาก ${approvedBy?.name || 'ผู้อนุมัติ'})`,
-        by: `${employeeName} • อนุมัติโดย ${approvedBy?.name || 'ผู้อนุมัติ'}`
-      }])
-
-      const queued = readStockApprovalQueue().filter(item => item.id !== approvalRequest.requestId)
-      writeStockApprovalQueue(queued)
-      setPendingApprovalCount(queued.length)
-
-      alert('✅ การลบสต๊อกได้รับอนุมัติแล้วและบันทึกสำเร็จ!')
-      setApprovalRequest(null)
-      setSelectedApproverId(approvers[0]?.id || '')
-      void fetchInventory()
-    } finally {
-      setIsApproving(false)
-    }
   }
 
   const displayedProducts = products.filter(p => p.category === activeCategory && p.name.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -516,29 +459,15 @@ export default function InventoryCheckPage() {
                 <p className="text-xs text-slate-500 mt-1">เหตุผล: {approvalRequest.reason}</p>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">เลือกผู้อนุมัติ</label>
-                <select
-                  value={selectedApproverId}
-                  onChange={(e) => setSelectedApproverId(e.target.value)}
-                  className="w-full border-2 border-slate-200 px-3 py-2.5 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-rose-500"
-                >
-                  {approvers.length === 0 ? <option value="">ไม่มีผู้อนุมัติ</option> : approvers.map((approver) => (
-                    <option key={approver.id} value={approver.id}>{approver.name} ({approver.role})</option>
-                  ))}
-                </select>
-              </div>
-
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] font-bold text-amber-800">
-                การลบสต็อกต้องได้รับอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้งก่อนจึงสามารถบันทึกได้
+                ส่งคำขอแล้ว กรุณาให้ผู้อนุมัติดำเนินการต่อที่เมนูคิวอนุมัติ การเปิดหน้านี้จะไม่ตัดสต็อก
               </div>
 
               <button
-                onClick={approveStockOut}
-                disabled={isApproving || approvers.length === 0}
-                className="w-full bg-rose-500 hover:bg-rose-600 disabled:bg-slate-300 text-white font-black py-4 rounded-xl shadow-lg shadow-rose-500/30 active:scale-95 transition-transform"
+                onClick={() => setApprovalRequest(null)}
+                className="w-full bg-slate-800 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg active:scale-95 transition-transform"
               >
-                {isApproving ? '⏳ กำลังอนุมัติ...' : '✅ ยืนยันอนุมัติและตัดสต๊อก'}
+                ปิดหน้าต่าง
               </button>
             </div>
           </div>

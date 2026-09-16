@@ -26,6 +26,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
         const session = localStorage.getItem('kingsawang_session')
         if (session && pathname !== '/login') {
           alert('⏱️ หมดเวลาการเชื่อมต่อ (ไม่มีการใช้งานเกิน 30 นาที) กรุณาล็อกอินใหม่')
+          void fetch('/api/auth/logout', { method: 'POST' })
           localStorage.removeItem('kingsawang_session')
           router.push('/login')
         }
@@ -124,7 +125,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         
-        <button onClick={() => { localStorage.removeItem('kingsawang_session'); window.location.href='/login' }} className="mt-8 text-slate-500 hover:text-white underline font-bold transition-colors">
+        <button onClick={() => { void fetch('/api/auth/logout', { method: 'POST' }); localStorage.removeItem('kingsawang_session'); window.location.href='/login' }} className="mt-8 text-slate-500 hover:text-white underline font-bold transition-colors">
           ออกจากระบบ (Logout)
         </button>
      </div>

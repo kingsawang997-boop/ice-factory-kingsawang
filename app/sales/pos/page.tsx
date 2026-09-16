@@ -556,12 +556,13 @@ export default function POSPage() {
 
       setTimeout(() => {
         alert('✅ บันทึกยอดปิดกะเรียบร้อย ระบบจะทำการออกจากระบบ');
+        void fetch('/api/auth/logout', { method: 'POST' });
         localStorage.removeItem('kingsawang_session'); window.location.href = '/login';
       }, 1500);
 
     } else {
       setCloseShiftSlip({ id: slipId, date: printDateStr, cashAmount: posCashToday, transferAmount: posTransferToday, actualCash: Number(actualPosCash), diff, by: cashierName })
-      setTimeout(() => { window.print(); setTimeout(() => { setCloseShiftSlip(null); localStorage.removeItem('kingsawang_session'); window.location.href = '/login' }, 1000) }, 1000)
+      setTimeout(() => { window.print(); setTimeout(() => { setCloseShiftSlip(null); void fetch('/api/auth/logout', { method: 'POST' }); localStorage.removeItem('kingsawang_session'); window.location.href = '/login' }, 1000) }, 1000)
     }
   }
 
