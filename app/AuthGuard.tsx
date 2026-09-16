@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -13,9 +13,76 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [lockInfo, setLockInfo] = useState({ contact: '', reason: '' })
   const [globalFont, setGlobalFont] = useState('text-sm')
 
+  const checkSecurity = useCallback(async () => {
+    // 1. อนุญาตให้เข้าหน้า Login ได้เสมอ
+    if (pathname === '/login') {
+      setIsLoading(false)
+      return
+    }
+
+    // 2. ขอดูบัตร (เช็ค LocalStorage)
+    const sessionStr = localStorage.getItem('kingsawang_session')
+    if (!sessionStr) {
+      return router.push('/login')
+    }
+    
+    const session = JSON.parse(sessionStr)
+    const userRole = session.role || ''
+
+    // 3. เช็คระบบ Billing & Config จาก Database
+    const { data: config } = await supabase.from('app_settings').select('*').eq('id', 'system_config').single()
+    
+    if (config) {
+      setGlobalFont(config.font_size || 'text-sm')
+      
+      const today = new Date()
+      const nextBilling = new Date(config.next_billing_date)
+      const isExpired = today > nextBilling
+      
+      if ((config.status === 'locked' || isExpired) && userRole !== 'ผู้พัฒนาโปรแกรม') {
+         setIsLocked(true)
+         setLockInfo({
+           contact: config.developer_contact,
+           reason: isExpired ? 'ระบบหมดอายุการใช้งาน (Expired)' : 'ระบบถูกระงับชั่วคราว (Locked by Admin)'
+         })
+         setIsLoading(false)
+         return
+      }
+    }
+
+    const isApprover = ['ผู้บริหาร', 'ผู้จัดการ', 'เจ้าของ', 'owner', 'manager', 'executive', 'director', 'admin', 'supervisor', 'dev', 'developer', 'ผู้พัฒนาโปรแกรม', 'พัฒนาโปรแกรม'].some(keyword => userRole.toLowerCase().includes(keyword.toLowerCase()))
+
+    if (userRole.includes('หน้าลาน') || userRole.includes('แคชเชียร์')) {
+       if (pathname === '/') {
+         setIsLoading(false)
+         return router.push('/sales/pos')
+       }
+       
+       const allowedPaths = ['/sales/pos', '/inventory', '/inventory/truck-loading']
+       if (!allowedPaths.includes(pathname)) {
+         alert('⛔ ภัยคุกคาม: พนักงานหน้าร้านไม่มีสิทธิ์เข้าถึงเมนูนี้')
+         return router.push('/sales/pos')
+       }
+    } else if (pathname === '/inventory/approvals' && !isApprover) {
+       alert('⛔ คุณไม่มีสิทธิ์เข้าถึงหน้าอนุมัติสต๊อก')
+       return router.push('/inventory')
+    } else if (userRole.includes('บัญชี')) {
+       if (pathname.startsWith('/admin')) {
+         alert('⛔ ภัยคุกคาม: ฝ่ายบัญชีไม่มีสิทธิ์เข้าถึงเมนูผู้ดูแลระบบ')
+         return router.push('/')
+       }
+    }
+
+    setIsLoading(false)
+  }, [pathname, router])
+
   useEffect(() => {
-    checkSecurity()
-  }, [pathname])
+    const timer = window.setTimeout(() => {
+      void checkSecurity()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [checkSecurity])
 
   // ⏱️ ระบบ Auto-Logout (เตะออกถ้าไม่ขยับเมาส์ 30 นาที)
   useEffect(() => {
@@ -44,68 +111,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       clearTimeout(timeout)
     }
   }, [pathname, router])
-
-  const checkSecurity = async () => {
-    // 1. อนุญาตให้เข้าหน้า Login ได้เสมอ
-    if (pathname === '/login') {
-      setIsLoading(false)
-      return
-    }
-
-    // 2. ขอดูบัตร (เช็ค LocalStorage)
-    const sessionStr = localStorage.getItem('kingsawang_session')
-    if (!sessionStr) {
-      return router.push('/login')
-    }
-    
-    const session = JSON.parse(sessionStr)
-    const userRole = session.role || ''
-
-    // 3. เช็คระบบ Billing & Config จาก Database
-    const { data: config } = await supabase.from('app_settings').select('*').eq('id', 'system_config').single()
-    
-    if (config) {
-      setGlobalFont(config.font_size || 'text-sm') // บังคับขนาดฟอนต์ทั่วระบบ
-      
-      const today = new Date()
-      const nextBilling = new Date(config.next_billing_date)
-      const isExpired = today > nextBilling
-      
-      // 🚨 ถ้าหมดอายุ หรือ โดนล็อก (แต่ให้สิทธิ์ Dev ทะลุกำแพงไปแก้บิลได้)
-      if ((config.status === 'locked' || isExpired) && userRole !== 'ผู้พัฒนาโปรแกรม') {
-         setIsLocked(true)
-         setLockInfo({
-           contact: config.developer_contact,
-           reason: isExpired ? 'ระบบหมดอายุการใช้งาน (Expired)' : 'ระบบถูกระงับชั่วคราว (Locked by Admin)'
-         })
-         setIsLoading(false)
-         return
-      }
-    }
-
-    // 4. เช็คสิทธิ์การเข้าถึงเมนู (RBAC)
-    if (userRole.includes('หน้าลาน') || userRole.includes('แคชเชียร์')) {
-       // 🌟 กฎใหม่: ถ้าพยายามเข้าหน้าแรก (/) ให้เด้งไปหน้าขายทันที
-       if (pathname === '/') {
-         setIsLoading(false)
-         return router.push('/sales/pos')
-       }
-       
-       const allowedPaths = ['/sales/pos', '/inventory', '/inventory/truck-loading']
-       if (!allowedPaths.includes(pathname)) {
-         alert('⛔ ภัยคุกคาม: พนักงานหน้าร้านไม่มีสิทธิ์เข้าถึงเมนูนี้')
-         return router.push('/sales/pos')
-       }
-    } else if (userRole.includes('บัญชี')) {
-       if (pathname.startsWith('/admin')) {
-         alert('⛔ ภัยคุกคาม: ฝ่ายบัญชีไม่มีสิทธิ์เข้าถึงเมนูผู้ดูแลระบบ')
-         return router.push('/')
-       }
-    }
-
-    // แอดมิน, ผู้บริหาร, ผู้พัฒนาโปรแกรม ผ่านได้หมด!
-    setIsLoading(false)
-  }
 
   // 🔲 หน้าจอโหลด
   if (isLoading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-blue-400 font-black animate-pulse">⏳ Authenticating System...</div>

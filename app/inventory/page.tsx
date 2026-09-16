@@ -5,13 +5,23 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import {
+  getSessionUser,
+  isStockApproverRole,
+  readStockApprovalRequests,
+  syncApprovalInbox,
+  writeStockApprovalRequests,
+  type StockApprovalRequest
+} from '@/lib/stock-approval'
 
-type TabletNavProps = { pathname: string; employeeName: string }
+type TabletNavProps = { pathname: string; employeeName: string; approvalQueueCount: number; canApproveStock: boolean }
 type InventoryProduct = { id: string; name: string; category: string; price: number; unit?: string; stock?: number; image?: string; icon?: string }
 type InventoryLog = { id: string; date?: string; product_id: string; product_name: string; type: 'IN' | 'OUT'; qty: number; note?: string; by: string }
 type NumpadState = { isOpen: boolean; type: 'IN' | 'OUT'; product: InventoryProduct | null; value: string; time: string; reason: string }
 
-function TabletNav({ pathname, employeeName }: TabletNavProps) {
+const buildApprovalId = () => `stock-approval-${Math.random().toString(36).slice(2, 10)}`
+
+function TabletNav({ pathname, employeeName, approvalQueueCount, canApproveStock }: TabletNavProps) {
   return (
     <div className="flex flex-wrap items-center gap-2 pb-2 shrink-0">
       <Link href="/" className="bg-white p-3 rounded-xl shadow-sm hover:bg-slate-50 text-slate-600 font-bold border border-slate-200 transition-all active:scale-95 flex items-center justify-center">🏠</Link>
@@ -19,6 +29,12 @@ function TabletNav({ pathname, employeeName }: TabletNavProps) {
         <Link href="/sales/pos" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/sales/pos' ? 'bg-emerald-50 text-emerald-700' : 'text-slate-500 hover:bg-slate-50'}`}>🛒 POS</Link>
         <Link href="/inventory" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory' ? 'bg-blue-50 text-blue-700' : 'text-slate-500 hover:bg-slate-50'}`}>📦 เช็คคลังสินค้า</Link>
         <Link href="/inventory/truck-loading" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/truck-loading' ? 'bg-orange-50 text-orange-700' : 'text-slate-500 hover:bg-slate-50'}`}>🚚 จ่ายของขึ้นรถ</Link>
+        {canApproveStock && (
+          <Link href="/inventory/approvals" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/inventory/approvals' ? 'bg-amber-50 text-amber-700' : 'text-slate-500 hover:bg-slate-50'}`}>
+            🧾 อนุมัติ
+            {approvalQueueCount > 0 && <span className="bg-amber-500 text-white rounded-full min-w-[18px] h-[18px] text-[10px] leading-[18px] px-1">{approvalQueueCount}</span>}
+          </Link>
+        )}
         <Link href="/trucks/maintenance" className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${pathname === '/trucks/maintenance' ? 'bg-purple-50 text-purple-700' : 'text-slate-500 hover:bg-slate-50'}`}>🔧 ซ่อมบำรุงรถ</Link>
       </div>
       <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 font-bold text-slate-600 shadow-sm text-xs shrink-0 flex items-center gap-2 ml-auto">
@@ -35,13 +51,28 @@ export default function InventoryCheckPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const pathname = usePathname()
   
-  const [employeeName, setEmployeeName] = useState('กำลังโหลดชื่อ...')
+  const [employeeName] = useState(() => {
+    if (typeof window === 'undefined') return 'กำลังโหลดชื่อ...'
+    try {
+      const session = localStorage.getItem('kingsawang_session')
+      if (!session) return 'กำลังโหลดชื่อ...'
+      return JSON.parse(session).name || 'ไม่ระบุชื่อ'
+    } catch {
+      return 'กำลังโหลดชื่อ...'
+    }
+  })
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
+  const [approvalQueueCount, setApprovalQueueCount] = useState(0)
   
   // 🌟 เริ่มต้นที่หน้ากระสอบเปล่าเลย (ตามที่คุณต้องการดู)
   const [activeCategory, setActiveCategory] = useState<'main' | 'packaging'>('packaging')
-
+  
   const [numpad, setNumpad] = useState<NumpadState>({ isOpen: false, type: 'IN', product: null, value: '0', time: '', reason: '' })
+
+  const refreshApprovalQueueCount = useCallback(async () => {
+    const requests = await readStockApprovalRequests()
+    setApprovalQueueCount(requests.filter((request) => request.status === 'pending').length)
+  }, [])
 
   const fetchInventory = useCallback(async () => {
     setIsLoading(true)
@@ -56,12 +87,41 @@ export default function InventoryCheckPage() {
   }, [])
 
   useEffect(() => {
-    const session = localStorage.getItem('kingsawang_session')
-    if (session) setEmployeeName(JSON.parse(session).name)
-    void fetchInventory()
-  }, [fetchInventory])
+    const timer = window.setTimeout(() => {
+      void refreshApprovalQueueCount()
+      void fetchInventory()
+    }, 0)
+
+    return () => window.clearTimeout(timer)
+  }, [fetchInventory, refreshApprovalQueueCount])
 
   const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
+    const sessionUser = getSessionUser()
+    const userRole = sessionUser?.role || ''
+
+    if (type === 'OUT' && !isStockApproverRole(userRole)) {
+      const request: StockApprovalRequest = {
+        id: buildApprovalId(),
+        productId: product.id,
+        productName: product.name,
+        productCategory: product.category,
+        quantity: 1,
+        action: 'OUT',
+        reason: 'รออนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง',
+        requestedBy: sessionUser?.name || 'ไม่ระบุชื่อ',
+        requestedByRole: userRole,
+        requestedAt: new Date().toISOString(),
+        status: 'pending'
+      }
+
+      const allRequests = readStockApprovalRequests()
+      writeStockApprovalRequests([request, ...allRequests])
+      void syncApprovalInbox(request, 'pending')
+      refreshApprovalQueueCount()
+      alert('⚠️ คำขออนุมัติถูกส่งแล้ว กรุณารอการอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง')
+      return
+    }
+
     const now = new Date()
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     
@@ -82,6 +142,34 @@ export default function InventoryCheckPage() {
     
     if (qty <= 0) return alert('กรุณาระบุจำนวนที่ต้องการทำรายการ')
     if (!product) return
+
+    const sessionUser = getSessionUser()
+    const userRole = sessionUser?.role || ''
+    const isApprover = isStockApproverRole(userRole)
+
+    if (numpad.type === 'OUT' && !isApprover) {
+      const request: StockApprovalRequest = {
+        id: buildApprovalId(),
+        productId: product.id,
+        productName: product.name,
+        productCategory: product.category,
+        quantity: qty,
+        action: 'OUT',
+        reason: numpad.reason,
+        requestedBy: sessionUser?.name || 'ไม่ระบุชื่อ',
+        requestedByRole: userRole,
+        requestedAt: new Date().toISOString(),
+        status: 'pending'
+      }
+
+      const allRequests = readStockApprovalRequests()
+      writeStockApprovalRequests([request, ...allRequests])
+      void syncApprovalInbox(request, 'pending')
+      refreshApprovalQueueCount()
+      alert('⚠️ คำขออนุมัติถูกส่งแล้ว กรุณารอการอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง')
+      setNumpad(prev => ({ ...prev, isOpen: false }))
+      return
+    }
 
     const newStock = numpad.type === 'IN' ? Number(product.stock || 0) + qty : Number(product.stock || 0) - qty
     if (newStock < 0) return alert('❌ ยอดคงเหลือห้ามติดลบ! (สต๊อกไม่พอเบิก)')
@@ -105,6 +193,8 @@ export default function InventoryCheckPage() {
   const displayedProducts = products.filter(p => p.category === activeCategory && p.name.toLowerCase().includes(searchQuery.toLowerCase()))
   const currentCategoryStock = products.filter(p => p.category === activeCategory).reduce((sum, p) => sum + Number(p.stock || 0), 0)
 
+  const canApproveStock = isStockApproverRole(getSessionUser()?.role || '')
+
   // 📊 คำนวณ Analytics ของกระสอบ (บีบโค้ดให้เร็วขึ้น)
   const sackAnalytics = useMemo(() => {
     const currentMonth = new Date().toISOString().slice(0, 7)
@@ -122,7 +212,7 @@ export default function InventoryCheckPage() {
     <div className="fixed inset-0 z-[999] flex flex-col bg-slate-50 overflow-hidden text-xs md:text-sm font-sans">
       <div className="p-4 w-full max-w-7xl mx-auto flex flex-col h-full overflow-hidden">
         
-        <TabletNav pathname={pathname} employeeName={employeeName} />
+        <TabletNav pathname={pathname} employeeName={employeeName} approvalQueueCount={approvalQueueCount} canApproveStock={canApproveStock} />
 
         {/* 🌟 Tab Switcher (บีบให้เล็กและอยู่ตรงกลาง) */}
         <div className="flex bg-white p-1 rounded-xl w-fit shadow-sm border border-slate-200 mt-2 mx-auto shrink-0">

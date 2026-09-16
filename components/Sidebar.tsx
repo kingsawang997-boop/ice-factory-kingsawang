@@ -55,6 +55,7 @@ export default function Sidebar() {
   const roleCheck = userRole.toLowerCase()
   if (roleCheck.includes('หน้าลาน') || roleCheck.includes('แคชเชียร์')) return null;
   const isDev = roleCheck.includes('พัฒนา') || roleCheck.includes('dev')
+  const isApprover = ['ผู้บริหาร', 'ผู้จัดการ', 'เจ้าของ', 'owner', 'manager', 'executive', 'director', 'admin', 'supervisor', 'พัฒนาโปรแกรม', 'ผู้พัฒนาโปรแกรม'].some(keyword => roleCheck.includes(keyword.toLowerCase()))
 
   // 🌟 Pro Style: เมนูหลัก (Main Menu)
   const menuClass = (path: string) => 
@@ -117,6 +118,11 @@ export default function Sidebar() {
           <Link href="/inventory" className={menuClass('/inventory')}>
             <span className="text-lg transition-transform duration-300 group-hover:scale-110">🏭</span> คลังสินค้า / กระสอบเปล่า
           </Link>
+          {isApprover && (
+            <Link href="/inventory/approvals" className={subMenuClass('/inventory/approvals')}>
+              <span className="transition-transform duration-300 group-hover:translate-x-1">🧾</span> อนุมัติการลบสต๊อก
+            </Link>
+          )}
           <Link href="/inventory/truck-loading" className={subMenuClass('/inventory/truck-loading')}>
             <span className="transition-transform duration-300 group-hover:translate-x-1">🚚</span> จ่ายสินค้าขึ้นหน่วยรถ
           </Link>
