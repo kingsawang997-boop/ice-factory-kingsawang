@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import {
   getSessionUser,
@@ -18,32 +18,59 @@ export default function InventoryApprovalsPage() {
   const session = getSessionUser()
   const role = session?.role || ''
   const [requests, setRequests] = useState<StockApprovalRequest[]>(() => 
-    readStockApprovalRequests().filter((request) => request.status === 'pending')
+    []
   )
 
   const isBlocked = !isStockApproverRole(role)
 
-  const refreshQueue = () => {
-    setRequests(readStockApprovalRequests().filter((request) => request.status === 'pending'))
+  const refreshQueue = async () => {
+    const allRequests = await readStockApprovalRequests()
+    setRequests(allRequests.filter((request) => request.status === 'pending'))
   }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshQueue()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [])
 
   const handleDecision = async (request: StockApprovalRequest, approved: boolean) => {
     const reviewerName = session?.name || 'System'
     const nextStatus: StockApprovalRequest['status'] = approved ? 'approved' : 'rejected'
 
-    const allRequests = readStockApprovalRequests()
-    const updatedRequests = allRequests.map((item): StockApprovalRequest => {
-      if (item.id !== request.id) return item
-      return {
-        ...item,
-        status: nextStatus,
-        reviewedBy: reviewerName,
-        reviewedAt: new Date().toISOString(),
-        note: approved ? 'อนุมัติแล้ว' : 'ปฏิเสธคำขอ'
-      }
-    })
+    const allRequests = await readStockApprovalRequests()
+    const currentRequest = allRequests.find((item) => item.id === request.id)
+    if (!currentRequest || currentRequest.status !== 'pending') {
+      await refreshQueue()
+      alert('คำขอนี้ถูกดำเนินการไปแล้วโดยผู้อนุมัติคนอื่น')
+      return
+    }
 
-    writeStockApprovalRequests(updatedRequests)
+    const claimedRequest: StockApprovalRequest = {
+      ...currentRequest,
+      status: 'approved',
+      reviewedBy: reviewerName,
+      reviewedAt: new Date().toISOString(),
+      note: approved ? 'กำลังดำเนินการอนุมัติ' : 'ปฏิเสธคำขอ'
+    }
+
+    if (approved) {
+      const { data: claimedRows, error: claimError } = await supabase
+        .from('stock_approval_requests')
+        .update({ status: 'approved', reviewed_by: reviewerName, reviewed_at: claimedRequest.reviewedAt, note: claimedRequest.note })
+        .eq('id', request.id)
+        .eq('status', 'pending')
+        .select('id')
+
+      if (claimError || !claimedRows || claimedRows.length !== 1) {
+        alert('คำขอนี้ถูกดำเนินการไปแล้ว หรือไม่สามารถล็อกคำขอได้')
+        await refreshQueue()
+        return
+      }
+    } else {
+      await writeStockApprovalRequests(allRequests.map((item) => item.id === request.id ? claimedRequest : item))
+    }
 
     if (approved) {
       try {
@@ -64,12 +91,16 @@ export default function InventoryApprovalsPage() {
           throw new Error('ยอดคงเหลือหลังอนุมัติจะติดลบ')
         }
 
-        await supabase
+        const { error: updateError } = await supabase
           .from('products')
           .update({ stock: nextStock })
           .eq('id', request.productId)
 
-        await supabase.from('inventory_logs').insert([
+        if (updateError) {
+          throw updateError
+        }
+
+        const { error: logError } = await supabase.from('inventory_logs').insert([
           {
             id: `LOG-${buildApprovalId()}`,
             date: new Date().toISOString(),
@@ -81,22 +112,21 @@ export default function InventoryApprovalsPage() {
             by: reviewerName
           }
         ])
+        if (logError) {
+          throw logError
+        }
       } catch (error) {
+        await supabase.from('stock_approval_requests').update({ status: 'pending', reviewed_by: null, reviewed_at: null, note: null }).eq('id', request.id).eq('status', 'approved')
         alert(error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการอนุมัติ')
         return
       }
     }
 
-    const updatedRequest: StockApprovalRequest = {
-      ...request,
-      status: nextStatus,
-      reviewedBy: reviewerName,
-      reviewedAt: new Date().toISOString(),
-      note: approved ? 'อนุมัติแล้ว' : 'ปฏิเสธคำขอ'
-    }
+    const updatedRequest: StockApprovalRequest = { ...claimedRequest, status: nextStatus, note: approved ? 'อนุมัติแล้ว' : 'ปฏิเสธคำขอ' }
 
+    await writeStockApprovalRequests((await readStockApprovalRequests()).map((item) => item.id === request.id ? updatedRequest : item))
     void syncApprovalInbox(updatedRequest, nextStatus)
-    refreshQueue()
+    await refreshQueue()
     alert(approved ? '✅ อนุมัติคำขอเรียบร้อยแล้ว' : '❌ ปฏิเสธคำขอเรียบร้อยแล้ว')
   }
 

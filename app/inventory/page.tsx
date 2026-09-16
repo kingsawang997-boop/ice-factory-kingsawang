@@ -96,32 +96,6 @@ export default function InventoryCheckPage() {
   }, [fetchInventory, refreshApprovalQueueCount])
 
   const openNumpad = (product: InventoryProduct, type: 'IN' | 'OUT') => {
-    const sessionUser = getSessionUser()
-    const userRole = sessionUser?.role || ''
-
-    if (type === 'OUT' && !isStockApproverRole(userRole)) {
-      const request: StockApprovalRequest = {
-        id: buildApprovalId(),
-        productId: product.id,
-        productName: product.name,
-        productCategory: product.category,
-        quantity: 1,
-        action: 'OUT',
-        reason: 'รออนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง',
-        requestedBy: sessionUser?.name || 'ไม่ระบุชื่อ',
-        requestedByRole: userRole,
-        requestedAt: new Date().toISOString(),
-        status: 'pending'
-      }
-
-      const allRequests = readStockApprovalRequests()
-      writeStockApprovalRequests([request, ...allRequests])
-      void syncApprovalInbox(request, 'pending')
-      refreshApprovalQueueCount()
-      alert('⚠️ คำขออนุมัติถูกส่งแล้ว กรุณารอการอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง')
-      return
-    }
-
     const now = new Date()
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     
@@ -162,10 +136,10 @@ export default function InventoryCheckPage() {
         status: 'pending'
       }
 
-      const allRequests = readStockApprovalRequests()
-      writeStockApprovalRequests([request, ...allRequests])
+      const allRequests = await readStockApprovalRequests()
+      await writeStockApprovalRequests([request, ...allRequests])
       void syncApprovalInbox(request, 'pending')
-      refreshApprovalQueueCount()
+      void refreshApprovalQueueCount()
       alert('⚠️ คำขออนุมัติถูกส่งแล้ว กรุณารอการอนุมัติจากผู้บริหารหรือพนักงานที่ได้รับแต่งตั้ง')
       setNumpad(prev => ({ ...prev, isOpen: false }))
       return
