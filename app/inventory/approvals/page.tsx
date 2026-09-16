@@ -20,8 +20,6 @@ const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
 
 const isStockApproverRole = (role: string) => /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
 
-const createLogId = () => `LOG-${Date.now()}`
-
 function readStockApprovalQueue(): ApprovalQueueItem[] {
   if (typeof window === 'undefined') return []
   try {
@@ -87,7 +85,7 @@ export default function StockApprovalQueuePage() {
         setIsApprover(false)
       }
 
-      setRequests(readStockApprovalQueue())
+      await refreshQueue()
       setIsLoading(false)
     }
 
@@ -95,12 +93,8 @@ export default function StockApprovalQueuePage() {
   }, [])
 
   const refreshQueue = async () => {
-    const localQueue = readStockApprovalQueue()
-    let mergedQueue = [...localQueue]
-
-    try {
-      const { data, error } = await supabase.from('inbox_entries').select('*').limit(100)
-      if (!error && Array.isArray(data)) {
+    const { data, error } = await supabase.from('inbox_entries').select('*').eq('type', 'stock_approval').order('created_at', { ascending: false }).limit(100)
+    if (!error && Array.isArray(data)) {
         const inboxItems = data
           .filter((entry) => !['approved', 'rejected'].includes(String(entry?.status || '').toLowerCase()))
           .filter((entry) => entry?.type === 'stock_approval' || entry?.kind === 'stock_approval' || /อนุมัติ.*สต็อก|stock.*approval/i.test(String(entry?.message || entry?.title || '')))
@@ -116,16 +110,12 @@ export default function StockApprovalQueuePage() {
             status: 'pending' as const
           }))
 
-        const byId = new Map(mergedQueue.map((item) => [item.id, item]))
-        inboxItems.forEach((item) => byId.set(item.id, item))
-        mergedQueue = Array.from(byId.values()).sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime())
-      }
-    } catch {
-      // Ignore missing inbox table and keep local queue only.
+        writeStockApprovalQueue(inboxItems)
+        setRequests(inboxItems)
+        return
     }
 
-    writeStockApprovalQueue(mergedQueue)
-    setRequests(mergedQueue)
+    setRequests([])
   }
 
   const handleApprove = async (request: ApprovalQueueItem) => {
@@ -157,21 +147,24 @@ export default function StockApprovalQueuePage() {
     alert('✅ อนุมัติคำขอลบสต๊อกสำเร็จ')
   }
 
-  const handleReject = (request: ApprovalQueueItem) => {
+  const handleReject = async (request: ApprovalQueueItem) => {
     if (!isApprover) {
       alert('❌ คุณไม่มีสิทธิ์ปฏิเสธคำขออนุมัติ')
       return
     }
 
-    const queue = readStockApprovalQueue().filter(item => item.id !== request.id)
-    writeStockApprovalQueue(queue)
-    setRequests(queue)
-    void supabase.from('inbox_entries').update({
-      status: 'rejected',
-      rejected_by: sessionId,
-      rejected_at: new Date().toISOString()
-    }).eq('id', request.id)
-    void refreshQueue()
+    const response = await fetch('/api/stock-approvals/reject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: request.id })
+    })
+    const result = await response.json().catch(() => null) as { error?: string } | null
+    if (!response.ok) {
+      alert(`❌ ${result?.error || 'ปฏิเสธคำขอไม่สำเร็จ'}`)
+      return
+    }
+
+    await refreshQueue()
     alert('❌ ปฏิเสธคำขออนุมัติแล้ว')
   }
 
@@ -217,7 +210,7 @@ export default function StockApprovalQueuePage() {
 
                   <div className="flex flex-col sm:flex-row gap-2">
                     <button onClick={() => void handleApprove(request)} className="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-3 rounded-xl font-black shadow-lg shadow-emerald-500/20 transition-all active:scale-95">✅ อนุมัติ</button>
-                    <button onClick={() => handleReject(request)} className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-3 rounded-xl font-black shadow-lg shadow-rose-500/20 transition-all active:scale-95">❌ ปฏิเสธ</button>
+                    <button onClick={() => void handleReject(request)} className="bg-rose-500 hover:bg-rose-600 text-white px-5 py-3 rounded-xl font-black shadow-lg shadow-rose-500/20 transition-all active:scale-95">❌ ปฏิเสธ</button>
                   </div>
                 </div>
               </div>
