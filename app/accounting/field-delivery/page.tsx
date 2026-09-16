@@ -21,21 +21,33 @@ export default function FieldDeliverySummaryPage() {
   const [selectedEmployee, setSelectedEmployee] = useState('all')
   const [selectedDay, setSelectedDay] = useState('all')
   const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   const fetchRecords = async () => {
     setIsLoading(true)
+    setLoadError('')
     const start = new Date(selectedYear, selectedMonth, 1)
     const end = new Date(selectedYear, selectedMonth + 1, 0)
+    const formatDate = (date: Date) => {
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
 
     const { data, error } = await supabase
       .from('field_delivery_daily')
       .select('*')
-      .gte('date', start.toISOString().slice(0, 10))
-      .lte('date', end.toISOString().slice(0, 10))
+      .gte('date', formatDate(start))
+      .lte('date', formatDate(end))
       .order('date', { ascending: false })
-      .order('createdAt', { ascending: false })
 
-    if (!error && data) setRecords(data as DeliveryRecord[])
+    if (error) {
+      setRecords([])
+      setLoadError(error.message)
+    } else if (data) {
+      setRecords(data as DeliveryRecord[])
+    }
     setIsLoading(false)
   }
 
@@ -165,6 +177,8 @@ export default function FieldDeliverySummaryPage() {
 
           {isLoading ? (
             <div className="p-10 text-center text-slate-400 font-bold">⏳ กำลังโหลดข้อมูล...</div>
+          ) : loadError ? (
+            <div className="p-10 text-center text-rose-500 font-bold">โหลดข้อมูลไม่สำเร็จ: {loadError}</div>
           ) : summaryByEmployee.length === 0 ? (
             <div className="p-10 text-center text-slate-400 font-bold">ยังไม่มีข้อมูลส่งหน้าลานสำหรับเงื่อนไขนี้</div>
           ) : (

@@ -263,7 +263,8 @@ export default function POSPage() {
   const saveFieldDeliveryRecord = async (saleId: string, saleAmount: number) => {
     if (!isFieldDelivery || !selectedFieldDeliveryEmployee || Number(fieldDeliveryBags) <= 0) return
 
-    const deliveryDate = new Date().toLocaleDateString('en-CA')
+    const now = new Date()
+    const deliveryDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     const selectedEmployee = fieldDeliveryEmployees.find(emp => emp.name === selectedFieldDeliveryEmployee)
 
     try {
@@ -274,8 +275,7 @@ export default function POSPage() {
         employee_role: selectedEmployee?.role || 'พนักงานส่งหน้าลาน',
         bags_sold: Number(fieldDeliveryBags),
         sales_id: saleId,
-        total_amount: Number(saleAmount || 0),
-        createdAt: new Date().toISOString()
+        total_amount: Number(saleAmount || 0)
       }])
 
       if (error) {
