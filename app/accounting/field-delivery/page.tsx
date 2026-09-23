@@ -23,32 +23,48 @@ export default function FieldDeliverySummaryPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
 
+  const parseCalendarDate = (value?: string) => {
+    if (!value) return null
+
+    const raw = String(value).trim()
+    const datePart = raw.includes('T') ? raw.split('T')[0] : raw
+    const [year, month, day] = datePart.split('-').map(Number)
+
+    if (!year || !month || !day) return null
+    return { year, month: month - 1, day }
+  }
+
+  const isInSelectedMonth = (value?: string) => {
+    const parsed = parseCalendarDate(value)
+    if (!parsed) return false
+    return parsed.year === selectedYear && parsed.month === selectedMonth
+  }
+
   const fetchRecords = async () => {
     setIsLoading(true)
     setLoadError('')
-    const start = new Date(selectedYear, selectedMonth, 1)
-    const end = new Date(selectedYear, selectedMonth + 1, 0)
-    const formatDate = (date: Date) => {
-      const year = date.getFullYear()
-      const month = String(date.getMonth() + 1).padStart(2, '0')
-      const day = String(date.getDate()).padStart(2, '0')
-      return `${year}-${month}-${day}`
-    }
 
-    const { data, error } = await supabase
-      .from('field_delivery_daily')
-      .select('*')
-      .gte('date', formatDate(start))
-      .lte('date', formatDate(end))
-      .order('date', { ascending: false })
+    try {
+      const { data, error } = await supabase
+        .from('field_delivery_daily')
+        .select('*')
+        .order('date', { ascending: false })
 
-    if (error) {
+      if (error) {
+        setRecords([])
+        setLoadError(error.message)
+        return
+      }
+
+      const rows = (data as DeliveryRecord[] | null) ?? []
+      const monthFiltered = rows.filter((record) => isInSelectedMonth(record.date || record.createdAt))
+      setRecords(monthFiltered)
+    } catch (err) {
       setRecords([])
-      setLoadError(error.message)
-    } else if (data) {
-      setRecords(data as DeliveryRecord[])
+      setLoadError(err instanceof Error ? err.message : 'Unknown error while loading field delivery data')
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
   }
 
   useEffect(() => {
