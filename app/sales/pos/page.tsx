@@ -267,19 +267,29 @@ export default function POSPage() {
     const deliveryDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
     const selectedEmployee = fieldDeliveryEmployees.find(emp => emp.name === selectedFieldDeliveryEmployee)
 
-    try {
-      const { error } = await supabase.from('field_delivery_daily').insert([{
-        id: `FD-${Date.now()}`,
-        date: deliveryDate,
-        employee_name: selectedFieldDeliveryEmployee,
-        employee_role: selectedEmployee?.role || 'พนักงานส่งหน้าลาน',
-        bags_sold: Number(fieldDeliveryBags),
-        sales_id: saleId,
-        total_amount: Number(saleAmount || 0)
-      }])
+    const payloadBase = {
+      date: deliveryDate,
+      employee_name: selectedFieldDeliveryEmployee,
+      bags_sold: Number(fieldDeliveryBags),
+      cashier_name: cashierName,
+      updated_at: now.toISOString()
+    }
 
-      if (error) {
-        console.error('Field delivery log save failed', error)
+    const payloadWithLegacyFields = {
+      ...payloadBase,
+      employee_role: selectedEmployee?.role || 'พนักงานส่งหน้าลาน',
+      sales_id: saleId,
+      total_amount: Number(saleAmount || 0)
+    }
+
+    try {
+      const { error } = await supabase.from('field_delivery_daily').insert([payloadWithLegacyFields])
+      if (!error) return
+
+      console.warn('Legacy field delivery fields rejected, retrying with minimal schema:', error.message)
+      const { error: fallbackError } = await supabase.from('field_delivery_daily').insert([payloadBase])
+      if (fallbackError) {
+        console.error('Field delivery log save failed', fallbackError)
       }
     } catch (err) {
       console.error('Field delivery log save failed', err)

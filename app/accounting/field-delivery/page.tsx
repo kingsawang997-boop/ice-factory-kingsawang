@@ -4,13 +4,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 
 type DeliveryRecord = {
-  id: string
-  date: string
-  employee_name: string
-  employee_role: string
-  bags_sold: number
+  id?: string
+  date?: string
+  employee_name?: string
+  employee_role?: string
+  bags_sold?: number | string
   sales_id?: string
-  total_amount?: number
+  total_amount?: number | string
+  cashier_name?: string
+  updated_at?: string
   createdAt?: string
 }
 
@@ -27,7 +29,14 @@ export default function FieldDeliverySummaryPage() {
     if (!value) return null
 
     const raw = String(value).trim()
-    const datePart = raw.includes('T') ? raw.split('T')[0] : raw
+    const isoLike = raw.includes(' ') ? raw.replace(' ', 'T') : raw
+    const parsed = new Date(isoLike)
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return { year: parsed.getFullYear(), month: parsed.getMonth(), day: parsed.getDate() }
+    }
+
+    const datePart = (raw.split('T')[0] || raw.split(' ')[0] || raw).trim()
     const [year, month, day] = datePart.split('-').map(Number)
 
     if (!year || !month || !day) return null
@@ -57,7 +66,10 @@ export default function FieldDeliverySummaryPage() {
       }
 
       const rows = (data as DeliveryRecord[] | null) ?? []
-      const monthFiltered = rows.filter((record) => isInSelectedMonth(record.date || record.createdAt))
+      const monthFiltered = rows.filter((record) => {
+        const value = record.date || record.createdAt || record.updated_at
+        return isInSelectedMonth(value)
+      })
       setRecords(monthFiltered)
     } catch (err) {
       setRecords([])
@@ -72,11 +84,19 @@ export default function FieldDeliverySummaryPage() {
   }, [selectedMonth, selectedYear])
 
   const employeeOptions = useMemo(() => {
-    return Array.from(new Set(records.map((record) => record.employee_name))).sort((a, b) => a.localeCompare(b))
+    const names = records
+      .map((record) => record.employee_name)
+      .filter((name): name is string => Boolean(name))
+
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))
   }, [records])
 
   const dayOptions = useMemo(() => {
-    return Array.from(new Set(records.map((record) => record.date))).sort((a, b) => b.localeCompare(a))
+    const values = records
+      .map((record) => record.date || record.createdAt || record.updated_at)
+      .filter((value): value is string => Boolean(value))
+
+    return Array.from(new Set(values)).sort((a, b) => b.localeCompare(a))
   }, [records])
 
   const filteredRecords = useMemo(() => {
@@ -93,11 +113,11 @@ export default function FieldDeliverySummaryPage() {
     const map = new Map<string, { name: string; role: string; bags: number; sales: number; days: Set<string>; records: DeliveryRecord[] }>()
 
     visibleRecords.forEach((record) => {
-      const key = record.employee_name
-      const current = map.get(key) || { name: record.employee_name, role: record.employee_role || '-', bags: 0, sales: 0, days: new Set<string>(), records: [] }
+      const key = record.employee_name || 'ไม่ระบุพนักงาน'
+      const current = map.get(key) || { name: key, role: record.employee_role || 'พนักงานส่งหน้าลาน', bags: 0, sales: 0, days: new Set<string>(), records: [] }
       current.bags += Number(record.bags_sold || 0)
       current.sales += Number(record.total_amount || 0)
-      current.days.add(record.date)
+      current.days.add(record.date || record.createdAt || record.updated_at || 'ไม่ระบุวันที่')
       current.records.push(record)
       map.set(key, current)
     })
@@ -235,14 +255,14 @@ export default function FieldDeliverySummaryPage() {
             {visibleRecords.length === 0 ? (
               <div className="p-10 text-center text-slate-400 font-bold">ไม่มีบันทึกรายการในเงื่อนไขที่เลือก</div>
             ) : (
-              visibleRecords.map((record) => (
-                <div key={record.id} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-4">
+              visibleRecords.map((record, index) => (
+                <div key={record.id || `${record.date || 'date'}-${record.employee_name || 'emp'}-${index}`} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 p-4">
                   <div>
-                    <p className="font-black text-slate-800">{record.employee_name}</p>
-                    <p className="text-xs text-slate-500">{record.employee_role} • {record.date}</p>
+                    <p className="font-black text-slate-800">{record.employee_name || 'ไม่ระบุพนักงาน'}</p>
+                    <p className="text-xs text-slate-500">{record.employee_role || 'พนักงานส่งหน้าลาน'} • {record.date || record.createdAt || record.updated_at || 'ไม่ระบุวันที่'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 md:gap-6 text-sm font-bold">
-                    <span className="text-sky-700">{record.bags_sold.toLocaleString()} กระสอบ</span>
+                    <span className="text-sky-700">{Number(record.bags_sold || 0).toLocaleString()} กระสอบ</span>
                     <span className="text-emerald-700">{Number(record.total_amount || 0).toLocaleString()} บ.</span>
                     <span className="text-slate-500">#{record.sales_id || '-'}</span>
                   </div>
