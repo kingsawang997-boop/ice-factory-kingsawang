@@ -270,24 +270,25 @@ export default function POSPage() {
     const payloadBase = {
       date: deliveryDate,
       employee_name: selectedFieldDeliveryEmployee,
-      bags_sold: Number(fieldDeliveryBags),
+      sacks_sold: Number(fieldDeliveryBags),
       cashier_name: cashierName,
       updated_at: now.toISOString()
     }
 
-    const payloadWithLegacyFields = {
+    const legacyFallback = {
       ...payloadBase,
+      bags_sold: Number(fieldDeliveryBags),
       employee_role: selectedEmployee?.role || 'พนักงานส่งหน้าลาน',
       sales_id: saleId,
       total_amount: Number(saleAmount || 0)
     }
 
     try {
-      const { error } = await supabase.from('field_delivery_daily').insert([payloadWithLegacyFields])
+      const { error } = await supabase.from('field_delivery_daily').insert([payloadBase])
       if (!error) return
 
-      console.warn('Legacy field delivery fields rejected, retrying with minimal schema:', error.message)
-      const { error: fallbackError } = await supabase.from('field_delivery_daily').insert([payloadBase])
+      console.warn('Current schema rejected insert, retrying legacy payload:', error.message)
+      const { error: fallbackError } = await supabase.from('field_delivery_daily').insert([legacyFallback])
       if (fallbackError) {
         console.error('Field delivery log save failed', fallbackError)
       }

@@ -8,6 +8,7 @@ type DeliveryRecord = {
   date?: string
   employee_name?: string
   employee_role?: string
+  sacks_sold?: number | string
   bags_sold?: number | string
   sales_id?: string
   total_amount?: number | string
@@ -70,7 +71,13 @@ export default function FieldDeliverySummaryPage() {
         const value = record.date || record.createdAt || record.updated_at
         return isInSelectedMonth(value)
       })
-      setRecords(monthFiltered)
+      setRecords(monthFiltered.map((record) => ({
+        ...record,
+        employee_name: record.employee_name || 'ไม่ระบุพนักงาน',
+        employee_role: record.employee_role || 'พนักงานส่งหน้าลาน',
+        sacks_sold: Number(record.sacks_sold ?? record.bags_sold ?? 0),
+        total_amount: Number(record.total_amount ?? 0)
+      })))
     } catch (err) {
       setRecords([])
       setLoadError(err instanceof Error ? err.message : 'Unknown error while loading field delivery data')
@@ -115,8 +122,8 @@ export default function FieldDeliverySummaryPage() {
     visibleRecords.forEach((record) => {
       const key = record.employee_name || 'ไม่ระบุพนักงาน'
       const current = map.get(key) || { name: key, role: record.employee_role || 'พนักงานส่งหน้าลาน', bags: 0, sales: 0, days: new Set<string>(), records: [] }
-      current.bags += Number(record.bags_sold || 0)
-      current.sales += Number(record.total_amount || 0)
+      current.bags += Number(record.sacks_sold ?? record.bags_sold ?? 0)
+      current.sales += Number(record.total_amount ?? 0)
       current.days.add(record.date || record.createdAt || record.updated_at || 'ไม่ระบุวันที่')
       current.records.push(record)
       map.set(key, current)
@@ -262,8 +269,8 @@ export default function FieldDeliverySummaryPage() {
                     <p className="text-xs text-slate-500">{record.employee_role || 'พนักงานส่งหน้าลาน'} • {record.date || record.createdAt || record.updated_at || 'ไม่ระบุวันที่'}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-4 md:gap-6 text-sm font-bold">
-                    <span className="text-sky-700">{Number(record.bags_sold || 0).toLocaleString()} กระสอบ</span>
-                    <span className="text-emerald-700">{Number(record.total_amount || 0).toLocaleString()} บ.</span>
+                    <span className="text-sky-700">{Number(record.sacks_sold ?? record.bags_sold ?? 0).toLocaleString()} กระสอบ</span>
+                    <span className="text-emerald-700">{Number(record.total_amount ?? 0).toLocaleString()} บ.</span>
                     <span className="text-slate-500">#{record.sales_id || '-'}</span>
                   </div>
                 </div>
