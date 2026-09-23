@@ -137,25 +137,31 @@ export default function FieldDeliverySummaryPage() {
 
   const monthLabel = new Date(selectedYear, selectedMonth, 1).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })
 
+  const clearFilters = () => {
+    setSelectedEmployee('all')
+    setSelectedDay('all')
+  }
+
   const exportCsv = () => {
     const csvRows = [
-      ['วันที่', 'พนักงาน', 'ตำแหน่ง', 'กระสอบ', 'ยอดขาย', 'เลขบิล'],
+      ['วันที่', 'พนักงาน', 'ตำแหน่ง', 'กระสอบ', 'ยอดขาย (บาท)', 'เลขบิล'],
       ...visibleRecords.map((record) => [
-        record.date,
-        record.employee_name,
-        record.employee_role,
-        String(record.bags_sold || 0),
-        String(Number(record.total_amount || 0)),
+        record.date || record.createdAt || record.updated_at || 'ไม่ระบุวันที่',
+        record.employee_name || 'ไม่ระบุพนักงาน',
+        record.employee_role || 'พนักงานส่งหน้าลาน',
+        String(Number(record.sacks_sold ?? record.bags_sold ?? 0)),
+        String(Number(record.total_amount ?? 0)),
         record.sales_id || ''
       ])
     ]
 
     const csv = csvRows.map((row) => row.map((value) => `"${String(value).replace(/"/g, '""')}"`).join(',')).join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const utf8WithBom = '\uFEFF' + csv
+    const blob = new Blob([utf8WithBom], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `field-delivery-${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.csv`
+    link.download = `สรุปส่งหน้าลาน-${new Date(selectedYear, selectedMonth, 1).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' })}.csv`
     link.click()
     URL.revokeObjectURL(url)
   }
@@ -179,7 +185,7 @@ export default function FieldDeliverySummaryPage() {
               {[selectedYear - 1, selectedYear, selectedYear + 1].map((y) => <option key={y} value={y}>{y + 543}</option>)}
             </select>
             <button onClick={exportCsv} className="bg-slate-900 hover:bg-black text-white px-5 py-2.5 rounded-xl font-bold transition-all active:scale-95">
-              ⬇️ Export CSV
+              ⬇️ ส่งออก CSV
             </button>
           </div>
         </div>
@@ -215,6 +221,9 @@ export default function FieldDeliverySummaryPage() {
                   <option key={day} value={day}>{day}</option>
                 ))}
               </select>
+              <button onClick={clearFilters} className="border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors">
+                ล้างตัวกรอง
+              </button>
             </div>
           </div>
 
