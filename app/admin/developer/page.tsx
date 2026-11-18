@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 
 export default function DeveloperPortalPage() {
   const router = useRouter()
@@ -72,24 +71,22 @@ export default function DeveloperPortalPage() {
   }
 
   async function fetchDatabaseStats() {
-    const queries = await Promise.all([
-      supabase.from('sales').select('*', { count: 'exact', head: true }),
-      supabase.from('products').select('*', { count: 'exact', head: true }),
-      supabase.from('employees').select('*', { count: 'exact', head: true }),
-      supabase.from('drawer_logs').select('*', { count: 'exact', head: true })
-    ])
+    const response = await fetch('/api/admin/developer/stats', { cache: 'no-store' })
+    const result = await response.json().catch(() => null) as {
+      stats?: { sales?: number; products?: number; employees?: number; pos_logs?: number }
+      error?: string
+    } | null
 
-    const errors = queries.filter((query) => query.error).map((query) => query.error?.message).filter(Boolean)
-    if (errors.length) {
-      alert(`❌ โหลดสถิติฐานข้อมูลไม่สำเร็จ:\n${errors.join('\n')}`)
+    if (!response.ok) {
+      alert(`❌ ${result?.error || 'โหลดสถิติฐานข้อมูลไม่สำเร็จ'}`)
       return
     }
 
     setDbStats({
-      sales: queries[0].count || 0,
-      products: queries[1].count || 0,
-      employees: queries[2].count || 0,
-      pos_logs: queries[3].count || 0
+      sales: result?.stats?.sales || 0,
+      products: result?.stats?.products || 0,
+      employees: result?.stats?.employees || 0,
+      pos_logs: result?.stats?.pos_logs || 0
     })
   }
 
