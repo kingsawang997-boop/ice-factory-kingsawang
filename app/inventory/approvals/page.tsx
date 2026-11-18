@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
+import { isStockApproverRole } from '../../../lib/stock-approval-permissions'
 
 type ApprovalQueueItem = {
   id: string
@@ -17,8 +18,6 @@ type ApprovalQueueItem = {
 }
 
 const STOCK_APPROVAL_QUEUE_KEY = 'kingsawang_stock_approval_requests'
-
-const isStockApproverRole = (role: string) => /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
 
 function readStockApprovalQueue(): ApprovalQueueItem[] {
   if (typeof window === 'undefined') return []
@@ -92,7 +91,7 @@ export default function StockApprovalQueuePage() {
     refreshStatus()
   }, [])
 
-  const refreshQueue = async () => {
+  async function refreshQueue() {
     const { data, error } = await supabase.from('inbox_entries').select('*').eq('type', 'stock_approval').order('created_at', { ascending: false }).limit(100)
     if (!error && Array.isArray(data)) {
         const inboxItems = data

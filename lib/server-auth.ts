@@ -1,6 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { supabase } from '@/lib/supabase'
+import { isStockApproverRole } from '@/lib/stock-approval-permissions'
+
+export { isStockApproverRole }
 
 const SESSION_COOKIE = 'kingsawang_server_session'
 const sessionSecret = process.env.APP_SESSION_SECRET || randomBytes(32).toString('hex')
@@ -74,7 +77,5 @@ export const getServerEmployee = async (): Promise<Employee | null> => {
   if (error || !data || !data.isActive) return null
   return data as Employee
 }
-
-export const isStockApproverRole = (role: string) => /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
 
 export const getServerSessionCookieName = () => SESSION_COOKIE

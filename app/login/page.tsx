@@ -4,6 +4,7 @@ import { useState, useEffect, type FormEvent } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { isStockApproverRole } from '@/lib/stock-approval-permissions'
 
 export default function LoginPage() {
   const [username, setUsername] = useState('')
@@ -52,7 +53,7 @@ export default function LoginPage() {
 
     const user = result.user
     const role = String(user.role || '')
-    const isStockApprover = /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+    const isStockApprover = isStockApproverRole(role)
 
     const sessionData = {
       id: user.id,

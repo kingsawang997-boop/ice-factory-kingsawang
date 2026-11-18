@@ -5,6 +5,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
+import { isStockApproverRole } from '@/lib/stock-approval-permissions'
 
 type TabletNavProps = { pathname: string; employeeName: string }
 type InventoryProduct = { id: string; name: string; category: string; price: number; unit?: string; stock?: number; image?: string; icon?: string }
@@ -88,7 +89,7 @@ export default function InventoryCheckPage() {
       const role = String(parsedSession?.role || '')
       const directPermission = Boolean(parsedSession?.isStockApprover || parsedSession?.canApproveStock || parsedSession?.permissions?.stockApproval)
 
-      return directPermission || /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|ได้รับแต่งตั้ง|อนุมัติ|manager|director|owner|admin|approver/i.test(role)
+      return directPermission || isStockApproverRole(role)
     } catch {
       return false
     }
@@ -116,7 +117,7 @@ export default function InventoryCheckPage() {
 
     const approvedEmployees = data.filter((employee) => {
       const role = String(employee.role || '')
-      return /ผู้บริหาร|ผู้จัดการ|เจ้าของ|ผู้พัฒนาโปรแกรม|manager|director|owner|admin|approver/i.test(role)
+      return isStockApproverRole(role)
     }).sort((a, b) => a.name.localeCompare(b.name, 'th'))
 
     setApprovers(approvedEmployees)
