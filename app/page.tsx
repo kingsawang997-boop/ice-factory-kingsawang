@@ -78,6 +78,8 @@ export default function DashboardPage() {
     { title: 'ประวัติเปิดลิ้นชัก', icon: '🚨', link: '/admin/drawer-logs' },
   ]
 
+  const isDeveloper = currentUser.role.trim() === 'ผู้พัฒนาโปรแกรม'
+
   return (
     <div className="space-y-6 p-4 md:p-6 bg-slate-50/50 min-h-screen text-sm font-sans">
       
@@ -184,6 +186,13 @@ export default function DashboardPage() {
               <h3 className="font-bold text-xs md:text-sm text-slate-300 group-hover:text-white transition-colors">{menu.title}</h3>
             </Link>
           ))}
+
+          {isDeveloper && (
+            <Link href="/admin/developer" className="bg-rose-950/70 hover:bg-rose-600 border border-rose-500/40 p-5 rounded-3xl transition-all hover:-translate-y-1 text-center group cursor-pointer">
+              <div className="text-3xl mb-3 transition-transform group-hover:scale-110">👨‍💻</div>
+              <h3 className="font-bold text-xs md:text-sm text-rose-200 group-hover:text-white transition-colors">ตั้งค่าระบบ (Dev Only)</h3>
+            </Link>
+          )}
         </div>
       </div>
 
