@@ -1,5 +1,5 @@
+import { createClient } from '@supabase/supabase-js'
 import { getServerEmployee } from '@/lib/server-auth'
-import { getServerSupabase } from '@/lib/server-supabase'
 
 const requireDeveloper = async () => {
   const employee = await getServerEmployee()
@@ -12,7 +12,15 @@ export async function GET() {
     return Response.json({ error: 'ไม่มีสิทธิ์ระดับผู้พัฒนา' }, { status: 403 })
   }
 
-  const serverSupabase = getServerSupabase()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !publicKey) {
+    return Response.json({ error: 'Missing Supabase public configuration' }, { status: 500 })
+  }
+
+  const serverSupabase = createClient(supabaseUrl, publicKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  })
   const { data, error } = await serverSupabase
     .from('app_settings')
     .select('*')
@@ -51,8 +59,30 @@ export async function POST(request: Request) {
     theme_color: ['blue', 'emerald', 'rose', 'amber'].includes(String(body.theme_color)) ? body.theme_color : 'blue'
   }
 
-  const serverSupabase = getServerSupabase()
-  const { error } = await serverSupabase.from('app_settings').upsert([settings], { onConflict: 'id' })
+  const employee = await requireDeveloper()
+  if (!employee) {
+    return Response.json({ error: 'ไม่มีสิทธิ์ระดับผู้พัฒนา' }, { status: 403 })
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!supabaseUrl || !publicKey) {
+    return Response.json({ error: 'Missing Supabase public configuration' }, { status: 500 })
+  }
+
+  const serverSupabase = createClient(supabaseUrl, publicKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  })
+  const { data, error } = await serverSupabase.rpc('update_app_settings', {
+    p_employee_id: employee.id,
+    p_status: settings.status,
+    p_next_billing_date: settings.next_billing_date,
+    p_developer_contact: settings.developer_contact,
+    p_app_logo: settings.app_logo,
+    p_font_size: settings.font_size,
+    p_theme_color: settings.theme_color
+  })
   if (error) return Response.json({ error: error.message }, { status: 500 })
+  if (!data) return Response.json({ error: 'ไม่มีสิทธิ์ระดับผู้พัฒนาหรือไม่พบการตั้งค่า' }, { status: 403 })
   return Response.json({ ok: true })
 }
