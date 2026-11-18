@@ -1,5 +1,5 @@
+import { createClient } from '@supabase/supabase-js'
 import { getServerEmployee } from '@/lib/server-auth'
-import { getServerSupabase } from '@/lib/server-supabase'
 
 export async function GET() {
   const employee = await getServerEmployee()
@@ -8,7 +8,15 @@ export async function GET() {
   }
 
   try {
-    const serverSupabase = getServerSupabase()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!supabaseUrl || !publicKey) {
+      return Response.json({ error: 'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY' }, { status: 500 })
+    }
+
+    const serverSupabase = createClient(supabaseUrl, publicKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    })
     const [sales, products, employees, drawerLogs] = await Promise.all([
       serverSupabase.from('sales').select('*', { count: 'exact', head: true }),
       serverSupabase.from('products').select('*', { count: 'exact', head: true }),
