@@ -16,8 +16,24 @@ export async function GET() {
       serverSupabase.from('drawer_logs').select('*', { count: 'exact', head: true })
     ])
 
-    const failed = [sales.error, products.error, employees.error, drawerLogs.error].find(Boolean)
-    if (failed) return Response.json({ error: failed.message }, { status: 500 })
+    const probes = [
+      { table: 'sales', result: sales },
+      { table: 'products', result: products },
+      { table: 'employees', result: employees },
+      { table: 'drawer_logs', result: drawerLogs }
+    ]
+
+    const failures = probes
+      .filter(({ result }) => result.error)
+      .map(({ table, result }) => {
+        const error = result.error as { message?: string; code?: string; status?: number } | null
+        const detail = error?.message || error?.code || (error?.status ? `HTTP ${error.status}` : '') || 'Unknown database error'
+        return `${table}: ${detail}`
+      })
+
+    if (failures.length) {
+      return Response.json({ error: failures.join('; ') }, { status: 500 })
+    }
 
     return Response.json({
       stats: {
