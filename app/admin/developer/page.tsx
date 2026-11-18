@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
+import { useState, useEffect, useCallback } from 'react'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -17,101 +17,139 @@ export default function DeveloperPortalPage() {
   })
   const [dbStats, setDbStats] = useState({ sales: 0, products: 0, employees: 0, pos_logs: 0 })
 
-  useEffect(() => {
-    void verifyDevAccess()
-  }, [])
-
   // 🛡️ ระบบรักษาความปลอดภัย 2 ชั้น (Double-Layer Security)
-  const verifyDevAccess = async () => {
+  const verifyDevAccess = useCallback(async () => {
     const sessionStr = localStorage.getItem('kingsawang_session')
-    
-    // ชั้นที่ 1: เช็คว่ามีการล็อกอินไหม
+
     if (!sessionStr) {
       alert('⛔ ไม่อนุญาตให้เข้าถึง: กรุณาล็อกอิน')
       return router.push('/login')
     }
 
     try {
-      // 🌟 ใส่ Try Catch ป้องกันแอป Crash กรณี LocalStorage โดนแก้จนพัง
-      const session = JSON.parse(sessionStr)
+      const session = JSON.parse(sessionStr) as { id?: string }
+      if (!session.id) throw new Error('Invalid local session')
 
-      // ชั้นที่ 2: เช็คกับ Database ยืนยันว่าเป็น Dev ของแท้ (ป้องกันการแฮกแก้ไข LocalStorage)
-      const { data: user, error } = await supabase
-        .from('employees')
-        .select('role')
-        .eq('id', session.id)
-        .single()
+      const response = await fetch('/api/admin/developer/access', { cache: 'no-store' })
+      const result = await response.json().catch(() => null) as { authorized?: boolean } | null
 
-      if (error || !user || user.role !== 'ผู้พัฒนาโปรแกรม') {
+      if (!response.ok || !result?.authorized) {
         alert('⛔ ภัยคุกคาม: คุณไม่มีสิทธิ์ระดับผู้พัฒนา (Developer) ในการเข้าถึงหน้านี้')
-        return router.push('/') // เตะกลับหน้าแรก
+        return router.push('/')
       }
 
-      // ผ่านทุกด่าน! อนุญาตให้แสดงหน้าต่างได้
       setIsAuthorized(true)
-      fetchSettings()
-      fetchDatabaseStats()
-    } catch (err) {
-      // ถ้ารหัสพัง เตะออกไปหน้าล็อกอิน
+      void fetchSettings()
+      void fetchDatabaseStats()
+    } catch {
       localStorage.removeItem('kingsawang_session')
       router.push('/login')
     }
-  }
+  }, [router])
 
-  const fetchSettings = async () => {
-    const { data } = await supabase.from('app_settings').select('*').eq('id', 'system_config').single()
+  async function fetchSettings() {
+    const response = await fetch('/api/admin/developer/settings', { cache: 'no-store' })
+    const result = await response.json().catch(() => null) as { settings?: { status?: string; next_billing_date?: string; developer_contact?: string; app_logo?: string; font_size?: string; theme_color?: string }; error?: string } | null
+
+    if (!response.ok) {
+      alert(`❌ ${result?.error || 'ไม่สามารถโหลดการตั้งค่าระบบได้'}`)
+      setIsLoading(false)
+      return
+    }
+
+    const data = result?.settings
     if (data) {
-      setSettings({ 
-        status: data.status || 'active', 
-        next_billing_date: data.next_billing_date || '', 
-        developer_contact: data.developer_contact || '', 
-        app_logo: data.app_logo || '', 
-        font_size: data.font_size || 'text-sm', 
-        theme_color: data.theme_color || 'blue' 
+      setSettings({
+        status: data.status || 'active',
+        next_billing_date: data.next_billing_date || '',
+        developer_contact: data.developer_contact || '',
+        app_logo: data.app_logo || '',
+        font_size: data.font_size || 'text-sm',
+        theme_color: data.theme_color || 'blue'
       })
     }
     setIsLoading(false)
   }
 
-  const fetchDatabaseStats = async () => {
-    const { count: salesCount } = await supabase.from('sales').select('*', { count: 'exact', head: true })
-    const { count: prodCount } = await supabase.from('products').select('*', { count: 'exact', head: true })
-    const { count: empCount } = await supabase.from('employees').select('*', { count: 'exact', head: true })
-    const { count: logCount } = await supabase.from('drawer_logs').select('*', { count: 'exact', head: true })
-    setDbStats({ sales: salesCount || 0, products: prodCount || 0, employees: empCount || 0, pos_logs: logCount || 0 })
+  async function fetchDatabaseStats() {
+    const queries = await Promise.all([
+      supabase.from('sales').select('*', { count: 'exact', head: true }),
+      supabase.from('products').select('*', { count: 'exact', head: true }),
+      supabase.from('employees').select('*', { count: 'exact', head: true }),
+      supabase.from('drawer_logs').select('*', { count: 'exact', head: true })
+    ])
+
+    const errors = queries.filter((query) => query.error).map((query) => query.error?.message).filter(Boolean)
+    if (errors.length) {
+      alert(`❌ โหลดสถิติฐานข้อมูลไม่สำเร็จ:\n${errors.join('\n')}`)
+      return
+    }
+
+    setDbStats({
+      sales: queries[0].count || 0,
+      products: queries[1].count || 0,
+      employees: queries[2].count || 0,
+      pos_logs: queries[3].count || 0
+    })
   }
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSaving(true)
-    const { error } = await supabase.from('app_settings').upsert([{ id: 'system_config', ...settings }])
-    if (error) alert('❌ เกิดข้อผิดพลาด: ' + error.message)
-    else alert('✅ บันทึกการตั้งค่าระบบ (Developer) เรียบร้อยแล้ว!')
-    setIsSaving(false)
+
+    try {
+      const response = await fetch('/api/admin/developer/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings)
+      })
+      const result = await response.json().catch(() => null) as { error?: string } | null
+
+      if (!response.ok) {
+        alert(`❌ ${result?.error || 'บันทึกการตั้งค่าไม่สำเร็จ'}`)
+      } else {
+        alert('✅ บันทึกการตั้งค่าระบบ (Developer) เรียบร้อยแล้ว!')
+      }
+    } catch (error) {
+      alert(`❌ ${error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'}`)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   const handleWipeSalesData = async () => {
     const confirmWord = window.prompt("⚠️ คำเตือน: นี่คือการลบข้อมูลการขายและประวัติทั้งหมด\n\nพิมพ์คำว่า 'DELETE' เพื่อยืนยัน:")
-    if (confirmWord === 'DELETE') {
-      setIsLoading(true)
-      
-      // 🌟 อัปเกรด: สั่งล้างข้อมูลตารางธุรกรรมทั้งหมดที่มีในระบบพร้อมกัน
-      await Promise.all([
-        supabase.from('sales').delete().neq('id', 'dummy'),
-        supabase.from('drawer_logs').delete().neq('id', 'dummy'),
-        supabase.from('route_settlements').delete().neq('id', 'dummy'),
-        supabase.from('payroll').delete().neq('id', 'dummy'),
-        supabase.from('cooler_transactions').delete().neq('id', 'dummy'),
-        supabase.from('maintenance_logs').delete().neq('id', 'dummy')
-      ])
+    if (confirmWord !== 'DELETE') {
+      if (confirmWord !== null) alert('ยกเลิกการทำงาน')
+      return
+    }
 
-      alert('🗑️ ล้างข้อมูลธุรกรรมทั้งหมดในระบบเรียบร้อยแล้ว')
-      fetchDatabaseStats()
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/admin/developer/wipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmation: 'DELETE' })
+      })
+      const result = await response.json().catch(() => null) as { error?: string } | null
+
+      if (!response.ok) {
+        alert(`❌ ล้างข้อมูลไม่สำเร็จ: ${result?.error || 'เกิดข้อผิดพลาดไม่ทราบสาเหตุ'}`)
+        return
+      }
+
+      alert('🗑️ ล้างข้อมูลธุรกรรมทั้งหมดและยืนยัน rollback ปลอดภัยเรียบร้อยแล้ว')
+      await fetchDatabaseStats()
+    } catch (error) {
+      alert(`❌ ${error instanceof Error ? error.message : 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้'}`)
+    } finally {
       setIsLoading(false)
-    } else if (confirmWord !== null) {
-      alert('ยกเลิกการทำงาน')
     }
   }
+
+  useEffect(() => {
+    void Promise.resolve().then(() => verifyDevAccess())
+  }, [verifyDevAccess])
 
   // 🛡️ ถ้ากำลังตรวจสอบสิทธิ์ ให้โชว์หน้าจอดำๆ ป้องกันการแอบดู
   if (!isAuthorized) {
@@ -192,7 +230,7 @@ export default function DeveloperPortalPage() {
                 <div className="space-y-3">
                   <label className="text-xs font-bold text-slate-400">URL โลโก้โรงงานลูกค้า</label>
                   <div className="flex gap-4 items-center">
-                    <div className="w-16 h-16 bg-[#0A0A0A] rounded-xl flex items-center justify-center text-2xl border border-[#333] overflow-hidden shrink-0">{settings.app_logo ? <img src={settings.app_logo} className="w-full h-full object-cover" /> : '🧊'}</div>
+                    <div className="w-16 h-16 bg-[#0A0A0A] rounded-xl flex items-center justify-center text-2xl border border-[#333] overflow-hidden shrink-0">{settings.app_logo ? <Image src={settings.app_logo} alt="โลโก้ระบบ" width={64} height={64} unoptimized className="w-full h-full object-cover" /> : '🧊'}</div>
                     <input type="url" value={settings.app_logo} onChange={e => setSettings({...settings, app_logo: e.target.value})} placeholder="https://..." className="w-full bg-[#0A0A0A] border border-[#333] px-4 py-4 rounded-xl focus:outline-none focus:border-purple-500 text-white text-sm" />
                   </div>
                 </div>

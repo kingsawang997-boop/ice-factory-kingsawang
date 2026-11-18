@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -12,10 +12,6 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const [isLocked, setIsLocked] = useState(false)
   const [lockInfo, setLockInfo] = useState({ contact: '', reason: '' })
   const [globalFont, setGlobalFont] = useState('text-sm')
-
-  useEffect(() => {
-    checkSecurity()
-  }, [pathname])
 
   // ⏱️ ระบบ Auto-Logout (เตะออกถ้าไม่ขยับเมาส์ 30 นาที)
   useEffect(() => {
@@ -46,7 +42,7 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [pathname, router])
 
-  const checkSecurity = async () => {
+  const checkSecurity = useCallback(async () => {
     // 1. อนุญาตให้เข้าหน้า Login ได้เสมอ
     if (pathname === '/login') {
       setIsLoading(false)
@@ -59,7 +55,15 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
       return router.push('/login')
     }
     
-    const session = JSON.parse(sessionStr)
+    let session: { role?: string }
+    try {
+      session = JSON.parse(sessionStr) as { role?: string }
+    } catch {
+      localStorage.removeItem('kingsawang_session')
+      void fetch('/api/auth/logout', { method: 'POST' })
+      return router.push('/login')
+    }
+
     const userRole = session.role || ''
 
     // 3. เช็คระบบ Billing & Config จาก Database
@@ -106,7 +110,11 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
     // แอดมิน, ผู้บริหาร, ผู้พัฒนาโปรแกรม ผ่านได้หมด!
     setIsLoading(false)
-  }
+  }, [pathname, router])
+
+  useEffect(() => {
+    void Promise.resolve().then(() => checkSecurity())
+  }, [checkSecurity])
 
   // 🔲 หน้าจอโหลด
   if (isLoading) return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-blue-400 font-black animate-pulse">⏳ Authenticating System...</div>
