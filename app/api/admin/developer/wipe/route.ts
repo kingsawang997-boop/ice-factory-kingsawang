@@ -1,5 +1,5 @@
+import { createClient } from '@supabase/supabase-js'
 import { getServerEmployee } from '@/lib/server-auth'
-import { getServerSupabase } from '@/lib/server-supabase'
 
 export async function POST(request: Request) {
   const employee = await getServerEmployee()
@@ -13,7 +13,15 @@ export async function POST(request: Request) {
   }
 
   try {
-    const serverSupabase = getServerSupabase()
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const publicKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!supabaseUrl || !publicKey) {
+      return Response.json({ error: 'Missing Supabase public configuration' }, { status: 500 })
+    }
+
+    const serverSupabase = createClient(supabaseUrl, publicKey, {
+      auth: { autoRefreshToken: false, persistSession: false }
+    })
     const { data, error } = await serverSupabase.rpc('wipe_developer_transaction_data', {
       p_employee_id: employee.id,
       p_confirmation: 'DELETE'
