@@ -18,6 +18,13 @@ export async function POST(request: Request) {
   if (error || !user) return Response.json({ error: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' }, { status: 401 })
   if (!user.isActive) return Response.json({ error: 'บัญชีนี้ถูกระงับการใช้งาน' }, { status: 403 })
 
-  await createServerSession(user.id)
+  try {
+    await createServerSession(user.id)
+  } catch (error) {
+    return Response.json({
+      error: error instanceof Error ? error.message : 'ไม่สามารถสร้าง session ได้'
+    }, { status: 500 })
+  }
+
   return Response.json({ user })
 }

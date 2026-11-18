@@ -6,7 +6,10 @@ import { isStockApproverRole } from '@/lib/stock-approval-permissions'
 export { isStockApproverRole }
 
 const SESSION_COOKIE = 'kingsawang_server_session'
-const sessionSecret = process.env.APP_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
+const sessionSecret =
+  process.env.APP_SESSION_SECRET ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 type SessionPayload = {
   employeeId: string
@@ -24,7 +27,7 @@ const encode = (value: string) => Buffer.from(value).toString('base64url')
 const decode = (value: string) => Buffer.from(value, 'base64url').toString('utf8')
 
 const sign = (value: string) => {
-  if (!sessionSecret) throw new Error('Missing APP_SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY')
+  if (!sessionSecret) throw new Error('Missing session signing key configuration')
   return createHmac('sha256', sessionSecret).update(value).digest('base64url')
 }
 
