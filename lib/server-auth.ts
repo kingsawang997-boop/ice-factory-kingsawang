@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { supabase } from '@/lib/supabase'
 import { isStockApproverRole } from '@/lib/stock-approval-permissions'
@@ -6,7 +6,7 @@ import { isStockApproverRole } from '@/lib/stock-approval-permissions'
 export { isStockApproverRole }
 
 const SESSION_COOKIE = 'kingsawang_server_session'
-const sessionSecret = process.env.APP_SESSION_SECRET || randomBytes(32).toString('hex')
+const sessionSecret = process.env.APP_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY
 
 type SessionPayload = {
   employeeId: string
@@ -23,7 +23,10 @@ type Employee = {
 const encode = (value: string) => Buffer.from(value).toString('base64url')
 const decode = (value: string) => Buffer.from(value, 'base64url').toString('utf8')
 
-const sign = (value: string) => createHmac('sha256', sessionSecret).update(value).digest('base64url')
+const sign = (value: string) => {
+  if (!sessionSecret) throw new Error('Missing APP_SESSION_SECRET or SUPABASE_SERVICE_ROLE_KEY')
+  return createHmac('sha256', sessionSecret).update(value).digest('base64url')
+}
 
 export const createServerSession = async (employeeId: string) => {
   const payload = encode(JSON.stringify({ employeeId, issuedAt: Date.now() } satisfies SessionPayload))
