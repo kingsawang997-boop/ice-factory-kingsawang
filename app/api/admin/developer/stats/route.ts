@@ -17,38 +17,43 @@ export async function GET() {
     const serverSupabase = createClient(supabaseUrl, publicKey, {
       auth: { autoRefreshToken: false, persistSession: false }
     })
-    const [sales, products, employees, drawerLogs] = await Promise.all([
-      serverSupabase.from('sales').select('*', { count: 'exact', head: true }),
-      serverSupabase.from('products').select('*', { count: 'exact', head: true }),
-      serverSupabase.from('employees').select('*', { count: 'exact', head: true }),
-      serverSupabase.from('drawer_logs').select('*', { count: 'exact', head: true })
-    ])
+    const countRows = async (table: 'sales' | 'products' | 'employees' | 'drawer_logs') => {
+      let count = 0
+      let offset = 0
 
-    const probes = [
-      { table: 'sales', result: sales },
-      { table: 'products', result: products },
-      { table: 'employees', result: employees },
-      { table: 'drawer_logs', result: drawerLogs }
-    ]
+      while (true) {
+        const { data, error } = await serverSupabase
+          .from(table)
+          .select('id')
+          .range(offset, offset + 999)
 
-    const failures = probes
-      .filter(({ result }) => result.error)
-      .map(({ table, result }) => {
-        const error = result.error as { message?: string; code?: string; status?: number } | null
-        const detail = error?.message || error?.code || (error?.status ? `HTTP ${error.status}` : '') || 'Unknown database error'
-        return `${table}: ${detail}`
-      })
+        if (error) {
+          const detail = error.message || error.code || 'Unknown database error'
+          throw new Error(`${table}: ${detail}`)
+        }
 
-    if (failures.length) {
-      return Response.json({ error: failures.join('; ') }, { status: 500 })
+        const rows = data || []
+        count += rows.length
+        if (rows.length < 1000) break
+        offset += 1000
+      }
+
+      return count
     }
+
+    const [sales, products, employees, drawerLogs] = await Promise.all([
+      countRows('sales'),
+      countRows('products'),
+      countRows('employees'),
+      countRows('drawer_logs')
+    ])
 
     return Response.json({
       stats: {
-        sales: sales.count || 0,
-        products: products.count || 0,
-        employees: employees.count || 0,
-        pos_logs: drawerLogs.count || 0
+        sales,
+        products,
+        employees,
+        pos_logs: drawerLogs
       }
     })
   } catch (error) {
