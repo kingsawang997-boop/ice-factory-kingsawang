@@ -3,7 +3,6 @@
 import { useState, useEffect, type FormEvent } from 'react'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 import { isStockApproverRole } from '@/lib/stock-approval-permissions'
 
 export default function LoginPage() {
@@ -17,17 +16,15 @@ export default function LoginPage() {
   // 🌟 ดึงข้อมูลตั้งค่าระบบ (โลโก้) ตอนเปิดหน้าเว็บ
   useEffect(() => {
     const fetchSystemSettings = async () => {
-      const { data, error } = await supabase
-        .from('app_settings')
-        .select('app_logo')
-        .eq('id', 'system_config')
-        .single()
-        
-      if (error) {
-        console.warn('App settings load error:', error.message)
+      const response = await fetch('/api/settings', { cache: 'no-store' })
+      const result = await response.json().catch(() => null) as { settings?: { app_logo?: string }; error?: string } | null
+
+      if (!response.ok) {
+        console.warn('App settings load error:', result?.error || 'ไม่สามารถดึงการตั้งค่าระบบได้')
+        return
       }
-      if (data && data.app_logo) {
-        setAppLogo(data.app_logo)
+      if (result?.settings?.app_logo) {
+        setAppLogo(result.settings.app_logo)
       }
     }
     fetchSystemSettings()

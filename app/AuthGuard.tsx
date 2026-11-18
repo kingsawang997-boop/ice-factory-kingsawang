@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { supabase } from '@/lib/supabase'
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
@@ -66,21 +65,23 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
 
     const userRole = session.role || ''
 
-    // 3. เช็คระบบ Billing & Config จาก Database
-    const { data: config } = await supabase.from('app_settings').select('*').eq('id', 'system_config').single()
-    
+    // 3. เช็คระบบ Billing & Config จาก Server API
+    const settingsResponse = await fetch('/api/settings', { cache: 'no-store' })
+    const settingsResult = await settingsResponse.json().catch(() => null) as { settings?: { status?: string; next_billing_date?: string; developer_contact?: string; font_size?: string } } | null
+    const config = settingsResponse.ok ? settingsResult?.settings : null
+
     if (config) {
       setGlobalFont(config.font_size || 'text-sm') // บังคับขนาดฟอนต์ทั่วระบบ
       
       const today = new Date()
-      const nextBilling = new Date(config.next_billing_date)
-      const isExpired = today > nextBilling
+      const nextBilling = new Date(config.next_billing_date || '')
+      const isExpired = Boolean(config.next_billing_date) && today > nextBilling
       
       // 🚨 ถ้าหมดอายุ หรือ โดนล็อก (แต่ให้สิทธิ์ Dev ทะลุกำแพงไปแก้บิลได้)
       if ((config.status === 'locked' || isExpired) && userRole !== 'ผู้พัฒนาโปรแกรม') {
          setIsLocked(true)
          setLockInfo({
-           contact: config.developer_contact,
+           contact: config.developer_contact || '',
            reason: isExpired ? 'ระบบหมดอายุการใช้งาน (Expired)' : 'ระบบถูกระงับชั่วคราว (Locked by Admin)'
          })
          setIsLoading(false)
